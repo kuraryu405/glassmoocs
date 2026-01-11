@@ -1,0 +1,126 @@
+/* =========================================
+   基本設定 & 背景
+   ========================================= */
+   body, .skin-green, .wrapper, .content-wrapper, html {
+    background-color: transparent !important;
+    background: transparent !important;
+}
+
+/* 背景画像（JSで上書きされない場合のデフォルト） */
+body {
+    background-image: url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop'); 
+    background-size: cover;
+    background-attachment: fixed;
+    background-position: center;
+    color: #e0e0e0 !important; /* 基本文字色を明るいグレーに */
+    font-family: "Helvetica Neue", Arial, sans-serif;
+}
+
+/* =========================================
+   グラスモーフィズム・コンテナ (.well, .panel)
+   ========================================= */
+/* 講義一覧のカード(.well) & 詳細ページのパネル(.panel) */
+.well, .panel, .box {
+    background: rgba(20, 20, 20, 0.65) !important; /* 黒ベースの半透明 */
+    backdrop-filter: blur(12px) !important;       /* ぼかし強め */
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important; /* 薄い白い枠線 */
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+    color: #ffffff !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* カードホバー時のエフェクト */
+.well:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5) !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* 詳細ページの中身の背景色を抜く */
+.pad-block, .pad-form, .problem-container, .problem-contentpage {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* =========================================
+   ヘッダー & サイドバー
+   ========================================= */
+/* ヘッダーバー */
+.main-header .navbar, .main-header .logo {
+    background: rgba(0, 0, 0, 0.5) !important; /* ヘッダーも透けさせる */
+    backdrop-filter: blur(8px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* サイドバー */
+.main-sidebar, .left-side {
+    background: rgba(10, 10, 10, 0.6) !important;
+    backdrop-filter: blur(12px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* サイドバーのメニュー項目 */
+.sidebar-menu > li.header {
+    color: #aaa !important;
+    background: transparent !important;
+}
+.sidebar-menu > li > a {
+    border-left: none !important;
+}
+.sidebar-menu > li:hover > a, .sidebar-menu > li.active > a {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: #fff !important;
+    border-radius: 0 20px 20px 0;
+}
+
+/* =========================================
+   文字・パーツ調整
+   ========================================= */
+/* 見出し */
+h1, h2, h3, h4, .content-header > h1 {
+    color: #ffffff !important;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+}
+
+/* パンくずリスト */
+.breadcrumb {
+    background: transparent !important;
+}
+.breadcrumb > li > a {
+    color: #81d4fa !important; /* 薄い青 */
+}
+.breadcrumb > .active {
+    color: #bbb !important;
+}
+
+/* ボタン (.btn-primary) */
+.btn-primary {
+    background: linear-gradient(135deg, rgba(60, 140, 255, 0.8), rgba(0, 100, 200, 0.8)) !important;
+    border: 1px solid rgba(255,255,255,0.2) !important;
+    box-shadow: 0 4px 15px rgba(0, 100, 255, 0.3);
+}
+.btn-primary:hover {
+    background: linear-gradient(135deg, rgba(80, 160, 255, 0.9), rgba(20, 120, 220, 0.9)) !important;
+}
+
+/* 入力フォーム (.form-control) */
+.form-control {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: #fff !important;
+    border-radius: 8px !important;
+}
+.form-control:focus {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    border-color: #81d4fa !important;
+}
+
+/* フッター */
+.main-footer {
+    background: transparent !important;
+    border-top: none !important;
+    color: #888 !important;
+}

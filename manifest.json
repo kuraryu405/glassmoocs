@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "INIAD Glassmorphism",
+  "version": "1.0",
+  "description": "MOOCSをグラスモーフィズム化してカッコよくする拡張機能",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://moocs.iniad.org/*"], 
+      "css": ["styles.css"],
+      "js": ["content.js"]
+    }
+  ]
+}
