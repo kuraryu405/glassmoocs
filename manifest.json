@@ -4,6 +4,11 @@
   "version": "1.0",
   "description": "MOOCSをグラスモーフィズム化してカッコよくする拡張機能",
   "permissions": ["storage"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "iniad-glassmorphism@local"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://moocs.iniad.org/*"], 
