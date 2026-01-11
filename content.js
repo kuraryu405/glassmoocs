@@ -2,12 +2,40 @@
    1. 背景画像設定 (前回と同じ)
    ========================================= */
    const STORAGE_KEY = 'iniad_bg_image';
+   const BG_STYLE_ID = 'iniad-bg-style';
 
-   function setBackground() {
-       const savedImage = localStorage.getItem(STORAGE_KEY);
-       if (savedImage) {
-           document.body.style.backgroundImage = `url('${savedImage}')`;
+   function ensureBgStyleElement() {
+       let styleEl = document.getElementById(BG_STYLE_ID);
+       if (!styleEl) {
+           styleEl = document.createElement('style');
+           styleEl.id = BG_STYLE_ID;
+           // headが無いケースはまず無いが、念のためbodyにもfallback
+           (document.head || document.body || document.documentElement).appendChild(styleEl);
        }
+       return styleEl;
+   }
+
+   // 背景を確実に上書きする（サイト側の!importantにも勝たせる）
+   function setBackground(explicitUrl) {
+       const savedImage = explicitUrl ?? localStorage.getItem(STORAGE_KEY);
+       if (!savedImage || !document.body) return;
+
+       // スタイルタグに書き込んで、後から上書きされても維持する
+       const styleEl = ensureBgStyleElement();
+       styleEl.textContent = `
+           body, html {
+               background-image: url('${savedImage}') !important;
+               background-size: cover !important;
+               background-attachment: fixed !important;
+               background-position: center !important;
+           }
+       `;
+
+       // 念のため直接も指定（即時反映）
+       document.body.style.setProperty('background-image', `url('${savedImage}')`, 'important');
+       document.body.style.setProperty('background-size', 'cover', 'important');
+       document.body.style.setProperty('background-attachment', 'fixed', 'important');
+       document.body.style.setProperty('background-position', 'center', 'important');
    }
    
    // ショートカット (Shift + Alt + B)
@@ -16,12 +44,17 @@
            const url = prompt("背景画像のURLを入力:", localStorage.getItem(STORAGE_KEY) || "");
            if (url) {
                localStorage.setItem(STORAGE_KEY, url);
-               setBackground();
+               setBackground(url);
            }
        }
    });
    
-   setBackground();
+   // DOMが準備できてから適用
+   if (document.readyState === 'complete' || document.readyState === 'interactive') {
+       setBackground();
+   } else {
+       window.addEventListener('DOMContentLoaded', () => setBackground());
+   }
    
    /* =========================================
       2. 爆速文字数カウンター & 自動リサイズ
@@ -93,11 +126,15 @@
    }
    
    // ページ読み込み完了時
-   window.addEventListener('load', attachEnhancements);
+   window.addEventListener('load', () => {
+       attachEnhancements();
+       setBackground();
+   });
    
    // AdminLTEやReact等が後からDOMを書き換える場合に対応 (MutationObserver)
    const observer = new MutationObserver((mutations) => {
        attachEnhancements();
+       setBackground(); // 背景が後から上書きされても元に戻す
    });
    
    observer.observe(document.body, {
