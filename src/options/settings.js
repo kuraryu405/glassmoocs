@@ -5,6 +5,61 @@ export const COLOR_MODES = {
   full: 'full',
 };
 
+const MODIFIER_KEYS = new Set(['Meta', 'Shift', 'Alt', 'Control']);
+const UNRELIABLE_KEYS = new Set(['Process', 'Unidentified', 'Dead', 'Compose']);
+const CODE_KEY_LABELS = {
+  Space: ' ',
+  Enter: 'Enter',
+  Escape: 'Escape',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+  ArrowUp: 'ArrowUp',
+  ArrowDown: 'ArrowDown',
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Backslash: '\\',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+};
+const DISPLAY_KEY_LABELS = {
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ' ': 'Space',
+};
+
+/**
+ * @typedef {Object} Shortcut
+ * @property {string} key
+ * @property {string} code
+ * @property {boolean} ctrl
+ * @property {boolean} meta
+ * @property {boolean} alt
+ * @property {boolean} shift
+ */
+
+/**
+ * @typedef {Object} GlassmoocsSettings
+ * @property {{previous: Shortcut, next: Shortcut}} shortcuts
+ * @property {string} tabColorMode
+ * @property {boolean} colorTabsEnabled
+ * @property {boolean} reloadAfterSubmit
+ */
+
 function getExtensionStorage() {
   if (globalThis.browser?.storage?.local) {
     return {
@@ -29,106 +84,50 @@ function getExtensionStorage() {
   return null;
 }
 
-function storageGet(storage, keys) {
+function callStorageArea(storage, method, payload) {
   if (storage.promiseBased) {
-    return storage.area.get(keys);
+    return storage.area[method](payload);
   }
 
   return new Promise((resolve, reject) => {
     let settled = false;
-    const finishResolve = (value) => {
+    const settleResolve = (value) => {
       if (settled) return;
       settled = true;
       resolve(value);
     };
-    const finishReject = (error) => {
+    const settleReject = (error) => {
       if (settled) return;
       settled = true;
       reject(error);
     };
 
     try {
-      storage.area.get(keys, (result) => {
+      storage.area[method](payload, (result) => {
         const error = globalThis.chrome?.runtime?.lastError;
         if (error) {
-          finishReject(new Error(error.message));
+          settleReject(new Error(error.message));
           return;
         }
 
-        finishResolve(result);
+        settleResolve(result);
       });
     } catch (error) {
-      finishReject(error);
+      settleReject(error);
     }
   });
+}
+
+function storageGet(storage, keys) {
+  return callStorageArea(storage, 'get', keys);
 }
 
 function storageSet(storage, values) {
-  if (storage.promiseBased) {
-    return storage.area.set(values);
-  }
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finishResolve = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    const finishReject = (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    };
-
-    try {
-      storage.area.set(values, () => {
-        const error = globalThis.chrome?.runtime?.lastError;
-        if (error) {
-          finishReject(new Error(error.message));
-          return;
-        }
-
-        finishResolve();
-      });
-    } catch (error) {
-      finishReject(error);
-    }
-  });
+  return callStorageArea(storage, 'set', values).then(() => {});
 }
 
 function storageRemove(storage, keys) {
-  if (storage.promiseBased) {
-    return storage.area.remove(keys);
-  }
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finishResolve = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    const finishReject = (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    };
-
-    try {
-      storage.area.remove(keys, () => {
-        const error = globalThis.chrome?.runtime?.lastError;
-        if (error) {
-          finishReject(new Error(error.message));
-          return;
-        }
-
-        finishResolve();
-      });
-    } catch (error) {
-      finishReject(error);
-    }
-  });
+  return callStorageArea(storage, 'remove', keys).then(() => {});
 }
 
 export function isMacLike() {
@@ -137,27 +136,24 @@ export function isMacLike() {
   );
 }
 
+function createDefaultShortcut(key, isMac) {
+  return {
+    key,
+    code: key,
+    ctrl: !isMac,
+    meta: isMac,
+    alt: false,
+    shift: false,
+  };
+}
+
 export function createDefaultSettings() {
-  const mac = isMacLike();
+  const isMac = isMacLike();
 
   return {
     shortcuts: {
-      previous: {
-        key: 'ArrowLeft',
-        code: 'ArrowLeft',
-        ctrl: !mac,
-        meta: mac,
-        alt: false,
-        shift: false,
-      },
-      next: {
-        key: 'ArrowRight',
-        code: 'ArrowRight',
-        ctrl: !mac,
-        meta: mac,
-        alt: false,
-        shift: false,
-      },
+      previous: createDefaultShortcut('ArrowLeft', isMac),
+      next: createDefaultShortcut('ArrowRight', isMac),
     },
     tabColorMode: COLOR_MODES.full,
     colorTabsEnabled: true,
@@ -165,22 +161,29 @@ export function createDefaultSettings() {
   };
 }
 
+function getObjectOrEmpty(value) {
+  return value && typeof value === 'object' ? value : {};
+}
+
+function mergeShortcut(defaultShortcut, rawShortcut) {
+  return {
+    ...defaultShortcut,
+    ...getObjectOrEmpty(rawShortcut),
+  };
+}
+
 export function mergeSettings(rawSettings) {
   const defaults = createDefaultSettings();
-  const raw = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const raw = getObjectOrEmpty(rawSettings);
+  const rawShortcuts = getObjectOrEmpty(raw.shortcuts);
 
   return {
     shortcuts: {
-      previous: {
-        ...defaults.shortcuts.previous,
-        ...(raw.shortcuts && raw.shortcuts.previous
-          ? raw.shortcuts.previous
-          : {}),
-      },
-      next: {
-        ...defaults.shortcuts.next,
-        ...(raw.shortcuts && raw.shortcuts.next ? raw.shortcuts.next : {}),
-      },
+      previous: mergeShortcut(
+        defaults.shortcuts.previous,
+        rawShortcuts.previous,
+      ),
+      next: mergeShortcut(defaults.shortcuts.next, rawShortcuts.next),
     },
     tabColorMode: COLOR_MODES.full,
     colorTabsEnabled:
@@ -201,11 +204,11 @@ export function normalizeKey(key) {
 }
 
 export function isModifierOnlyKey(key) {
-  return ['Meta', 'Shift', 'Alt', 'Control'].includes(key);
+  return MODIFIER_KEYS.has(key);
 }
 
 function isUnreliableKey(key) {
-  return ['Process', 'Unidentified', 'Dead', 'Compose'].includes(key);
+  return UNRELIABLE_KEYS.has(key);
 }
 
 function keyFromCode(code) {
@@ -214,35 +217,7 @@ function keyFromCode(code) {
   if (/^Digit[0-9]$/.test(code)) return code.slice(5);
   if (/^Numpad[0-9]$/.test(code)) return code.slice(6);
 
-  const codeLabels = {
-    Space: ' ',
-    Enter: 'Enter',
-    Escape: 'Escape',
-    Tab: 'Tab',
-    Backspace: 'Backspace',
-    Delete: 'Delete',
-    Home: 'Home',
-    End: 'End',
-    PageUp: 'PageUp',
-    PageDown: 'PageDown',
-    ArrowLeft: 'ArrowLeft',
-    ArrowRight: 'ArrowRight',
-    ArrowUp: 'ArrowUp',
-    ArrowDown: 'ArrowDown',
-    Comma: ',',
-    Period: '.',
-    Slash: '/',
-    Backslash: '\\',
-    Semicolon: ';',
-    Quote: "'",
-    BracketLeft: '[',
-    BracketRight: ']',
-    Minus: '-',
-    Equal: '=',
-    Backquote: '`',
-  };
-
-  return codeLabels[code] || code;
+  return CODE_KEY_LABELS[code] || code;
 }
 
 function getShortcutStoredKey(shortcut) {
@@ -313,13 +288,13 @@ export function shortcutFromEvent(event) {
 
 export function validateSettings(settings) {
   const errors = [];
-  const previous = settings.shortcuts.previous;
-  const next = settings.shortcuts.next;
+  const { previous, next } = settings.shortcuts;
+  const shortcutTargets = [
+    { shortcut: previous, label: '前のタブ' },
+    { shortcut: next, label: '次のタブ' },
+  ];
 
-  [
-    ['previous', previous, '前のタブ'],
-    ['next', next, '次のタブ'],
-  ].forEach(([, shortcut, label]) => {
+  shortcutTargets.forEach(({ shortcut, label }) => {
     if (!shortcut.key) {
       errors.push(`${label}のキーが未設定です。`);
       return;
@@ -335,7 +310,9 @@ export function validateSettings(settings) {
     }
   });
 
-  if (shortcutToId(previous) && shortcutToId(previous) === shortcutToId(next)) {
+  const previousShortcutId = shortcutToId(previous);
+  const nextShortcutId = shortcutToId(next);
+  if (previousShortcutId && previousShortcutId === nextShortcutId) {
     errors.push('前のタブと次のタブに同じショートカットは使えません。');
   }
 
@@ -406,13 +383,5 @@ export async function saveBackgroundImage(value) {
 }
 
 function formatKey(key) {
-  const labels = {
-    ArrowLeft: '←',
-    ArrowRight: '→',
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-    ' ': 'Space',
-  };
-
-  return labels[key] || key.toUpperCase();
+  return DISPLAY_KEY_LABELS[key] || key.toUpperCase();
 }

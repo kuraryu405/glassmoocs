@@ -11,6 +11,15 @@ import {
   validateSettings,
 } from './settings.js';
 
+const BACKGROUND_URL_ERROR =
+  '背景画像は http:// または https:// のURLだけ使えます。';
+const LOAD_ERROR_MESSAGE =
+  '設定の読み込みに失敗しました。初期値で表示しています。';
+const SAVE_ERROR_MESSAGE =
+  '設定の保存に失敗しました。アドオンを再読み込みしてください。';
+const SAVE_SUCCESS_MESSAGE =
+  '保存しました。開いているMOOCSページにも自動で反映されます。';
+
 export default function App() {
   const [settings, setSettings] = useState(createDefaultSettings);
   const [backgroundUrl, setBackgroundUrl] = useState('');
@@ -18,6 +27,44 @@ export default function App() {
   const [recording, setRecording] = useState(null);
   const [errors, setErrors] = useState([]);
   const [savedMessage, setSavedMessage] = useState('');
+
+  function clearFeedback() {
+    setSavedMessage('');
+    setErrors([]);
+  }
+
+  function applySettingsPatch(patch) {
+    setSettings((current) => ({
+      ...current,
+      ...patch,
+    }));
+    clearFeedback();
+  }
+
+  function validateBackgroundUrl(value) {
+    const normalized = value.trim();
+    if (!normalized) return '';
+
+    try {
+      const { protocol } = new URL(normalized);
+      if (protocol === 'http:' || protocol === 'https:') {
+        return '';
+      }
+    } catch {
+      return BACKGROUND_URL_ERROR;
+    }
+
+    return BACKGROUND_URL_ERROR;
+  }
+
+  function getValidationErrors() {
+    const nextErrors = validateSettings(settings);
+    const backgroundError = validateBackgroundUrl(backgroundUrl);
+    if (backgroundError) {
+      nextErrors.push(backgroundError);
+    }
+    return nextErrors;
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -32,7 +79,7 @@ export default function App() {
       .catch(() => {
         if (!mounted) return;
 
-        setErrors(['設定の読み込みに失敗しました。初期値で表示しています。']);
+        setErrors([LOAD_ERROR_MESSAGE]);
       })
       .finally(() => {
         if (!mounted) return;
@@ -70,9 +117,8 @@ export default function App() {
           [recording]: nextShortcut,
         },
       }));
+      clearFeedback();
       setRecording(null);
-      setSavedMessage('');
-      setErrors([]);
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -83,66 +129,32 @@ export default function App() {
   }, [recording]);
 
   function setReloadAfterSubmit(reloadAfterSubmit) {
-    setSettings((current) => ({
-      ...current,
-      reloadAfterSubmit,
-    }));
-    setSavedMessage('');
-    setErrors([]);
+    applySettingsPatch({ reloadAfterSubmit });
   }
 
   function setColorTabsEnabled(colorTabsEnabled) {
-    setSettings((current) => ({
-      ...current,
-      colorTabsEnabled,
-    }));
-    setSavedMessage('');
-    setErrors([]);
+    applySettingsPatch({ colorTabsEnabled });
   }
 
   function handleBackgroundUrlChange(event) {
     setBackgroundUrl(event.target.value);
-    setSavedMessage('');
-    setErrors([]);
+    clearFeedback();
   }
 
   function clearBackgroundImage() {
     setBackgroundUrl('');
-    setSavedMessage('');
-    setErrors([]);
-  }
-
-  function validateBackgroundUrl(value) {
-    const normalized = value.trim();
-    if (!normalized) return '';
-
-    try {
-      const url = new URL(normalized);
-      if (url.protocol === 'http:' || url.protocol === 'https:') {
-        return '';
-      }
-    } catch {
-      return '背景画像は http:// または https:// のURLだけ使えます。';
-    }
-
-    return '背景画像は http:// または https:// のURLだけ使えます。';
+    clearFeedback();
   }
 
   function resetDefaults() {
     setSettings(createDefaultSettings());
     setBackgroundUrl('');
-    setSavedMessage('');
-    setErrors([]);
+    clearFeedback();
     setRecording(null);
   }
 
   async function handleSave() {
-    const nextErrors = validateSettings(settings);
-    const backgroundError = validateBackgroundUrl(backgroundUrl);
-
-    if (backgroundError) {
-      nextErrors.push(backgroundError);
-    }
+    const nextErrors = getValidationErrors();
 
     if (nextErrors.length > 0) {
       setErrors(nextErrors);
@@ -154,16 +166,16 @@ export default function App() {
       await saveSettings(settings);
       await saveBackgroundImage(backgroundUrl);
       setErrors([]);
-      setSavedMessage(
-        '保存しました。開いているMOOCSページにも自動で反映されます。',
-      );
+      setSavedMessage(SAVE_SUCCESS_MESSAGE);
     } catch {
       setSavedMessage('');
-      setErrors([
-        '設定の保存に失敗しました。アドオンを再読み込みしてください。',
-      ]);
+      setErrors([SAVE_ERROR_MESSAGE]);
     }
   }
+
+  const backgroundInputValue = backgroundUrl.startsWith('data:')
+    ? ''
+    : backgroundUrl;
 
   return (
     <main className="settings-shell">
@@ -177,15 +189,11 @@ export default function App() {
 
       <section className="settings-grid" aria-busy={loading}>
         <article className="panel shortcut-panel">
-          <div className="section-heading">
-            <span>01</span>
-            <div>
-              <h2>タブ移動ショートカット</h2>
-              <p>
-                ボタンを押してから、使いたいキーの組み合わせを入力してください。
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            step="01"
+            title="タブ移動ショートカット"
+            description="ボタンを押してから、使いたいキーの組み合わせを入力してください。"
+          />
 
           <ShortcutRecorder
             title="前のタブ"
@@ -206,87 +214,41 @@ export default function App() {
         </article>
 
         <article className="panel">
-          <div className="section-heading">
-            <span>02</span>
-            <div>
-              <h2>タブ表示</h2>
-              <p>
-                出席テスト、出席課題、課題、理解度確認、スライドをタイトルから自動判定して、全面カラーで表示します。
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            step="02"
+            title="タブ表示"
+            description="出席テスト、出席課題、課題、理解度確認、スライドをタイトルから自動判定して、全面カラーで表示します。"
+          />
 
-          <button
-            type="button"
-            className={
-              settings.colorTabsEnabled ? 'toggle-card active' : 'toggle-card'
-            }
-            onClick={() => setColorTabsEnabled(!settings.colorTabsEnabled)}
-            aria-pressed={settings.colorTabsEnabled}
-          >
-            <div className="toggle-copy">
-              <strong>全面カラーを使う</strong>
-              <small>
-                ON のときだけ、タブ全体を色で塗って種類を見分けます。
-              </small>
-            </div>
-            <span className="toggle-meta">
-              <span className="toggle-state">
-                {settings.colorTabsEnabled ? 'ON' : 'OFF'}
-              </span>
-              <span className="toggle-switch" aria-hidden="true">
-                <span />
-              </span>
-            </span>
-          </button>
+          <ToggleCard
+            enabled={settings.colorTabsEnabled}
+            title="全面カラーを使う"
+            description="ON のときだけ、タブ全体を色で塗って種類を見分けます。"
+            onToggle={() => setColorTabsEnabled(!settings.colorTabsEnabled)}
+          />
         </article>
 
         <article className="panel">
-          <div className="section-heading">
-            <span>03</span>
-            <div>
-              <h2>提出後の自動リロード</h2>
-              <p>
-                出席課題や課題の「提出」成功ダイアログを閉じたあと、ページを自動で再読み込みします。
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            step="03"
+            title="提出後の自動リロード"
+            description="出席課題や課題の「提出」成功ダイアログを閉じたあと、ページを自動で再読み込みします。"
+          />
 
-          <button
-            type="button"
-            className={
-              settings.reloadAfterSubmit ? 'toggle-card active' : 'toggle-card'
-            }
-            onClick={() => setReloadAfterSubmit(!settings.reloadAfterSubmit)}
-            aria-pressed={settings.reloadAfterSubmit}
-          >
-            <div className="toggle-copy">
-              <strong>提出後にページを更新する</strong>
-              <small>
-                初期値はOFFです。保存成功メッセージのあとにだけ再読み込みします。
-              </small>
-            </div>
-            <span className="toggle-meta">
-              <span className="toggle-state">
-                {settings.reloadAfterSubmit ? 'ON' : 'OFF'}
-              </span>
-              <span className="toggle-switch" aria-hidden="true">
-                <span />
-              </span>
-            </span>
-          </button>
+          <ToggleCard
+            enabled={settings.reloadAfterSubmit}
+            title="提出後にページを更新する"
+            description="初期値はOFFです。保存成功メッセージのあとにだけ再読み込みします。"
+            onToggle={() => setReloadAfterSubmit(!settings.reloadAfterSubmit)}
+          />
         </article>
 
         <article className="panel">
-          <div className="section-heading">
-            <span>04</span>
-            <div>
-              <h2>背景画像</h2>
-              <p>
-                初期状態では背景なしです。画像URLを貼るか、ローカル画像をアップロードして使えます。
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            step="04"
+            title="背景画像"
+            description="初期状態では背景なしです。画像URLを貼るか、Shift+Alt+Bで設定できます。"
+          />
 
           <div className="background-editor">
             <label className="field-label" htmlFor="background-url">
@@ -297,7 +259,7 @@ export default function App() {
               className="text-field"
               type="url"
               placeholder="https://example.com/background.jpg"
-              value={backgroundUrl.startsWith('data:') ? '' : backgroundUrl}
+              value={backgroundInputValue}
               onChange={handleBackgroundUrlChange}
             />
 
@@ -349,6 +311,40 @@ export default function App() {
         </div>
       </section>
     </main>
+  );
+}
+
+function SectionHeading({ step, title, description }) {
+  return (
+    <div className="section-heading">
+      <span>{step}</span>
+      <div>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function ToggleCard({ enabled, title, description, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={enabled ? 'toggle-card active' : 'toggle-card'}
+      onClick={onToggle}
+      aria-pressed={enabled}
+    >
+      <div className="toggle-copy">
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </div>
+      <span className="toggle-meta">
+        <span className="toggle-state">{enabled ? 'ON' : 'OFF'}</span>
+        <span className="toggle-switch" aria-hidden="true">
+          <span />
+        </span>
+      </span>
+    </button>
   );
 }
 
