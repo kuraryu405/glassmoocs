@@ -6,7 +6,7 @@
   "permissions": ["storage"],
   "browser_specific_settings": {
     "gecko": {
-      "id": "glassmoocs@kuraryu405.github.io",
+      "id": "iniad-glassmorphism@local",
       "data_collection_permissions": {
         "required": ["none"]
       }
