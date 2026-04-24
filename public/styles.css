@@ -1,0 +1,345 @@
+/* =========================================
+   基本設定 & 背景
+   ========================================= */
+.skin-green,
+.wrapper,
+.content-wrapper,
+html {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+/* 背景画像（JSで上書きされない場合のデフォルト） */
+body {
+  background-size: cover;
+  background-attachment: fixed;
+  background-position: center;
+  color: #e0e0e0 !important;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* =========================================
+   グラスモーフィズム・コンテナ (.well, .panel)
+   ========================================= */
+.well,
+.panel,
+.box {
+  background: rgba(20, 20, 20, 0.65) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+  color: #ffffff !important;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.well:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.pad-block,
+.pad-form,
+.problem-container,
+.problem-contentpage {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* =========================================
+   ヘッダー & サイドバー
+   ========================================= */
+.main-header .navbar,
+.main-header .logo {
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(8px) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.main-sidebar,
+.left-side {
+  background: rgba(10, 10, 10, 0.6) !important;
+  backdrop-filter: blur(12px) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-menu > li.header {
+  color: #aaa !important;
+  background: transparent !important;
+}
+
+.sidebar-menu > li > a {
+  border-left: none !important;
+}
+
+.sidebar-menu > li:hover > a,
+.sidebar-menu > li.active > a {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+  border-radius: 0 20px 20px 0;
+}
+
+/* =========================================
+   文字・パーツ調整
+   ========================================= */
+h1,
+h2,
+h3,
+h4,
+.content-header > h1 {
+  color: #ffffff !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+.breadcrumb {
+  background: transparent !important;
+}
+
+.breadcrumb > li > a {
+  color: #81d4fa !important;
+}
+
+.breadcrumb > .active {
+  color: #bbb !important;
+}
+
+.btn-primary {
+  background: linear-gradient(
+    135deg,
+    rgba(60, 140, 255, 0.8),
+    rgba(0, 100, 200, 0.8)
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 15px rgba(0, 100, 255, 0.3);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(80, 160, 255, 0.9),
+    rgba(20, 120, 220, 0.9)
+  ) !important;
+}
+
+.form-control,
+.form-control[readonly],
+input[type='text'],
+input[type='password'],
+input[type='email'],
+input[type='number'],
+input[type='search'],
+input[type='url'],
+textarea,
+select,
+.CodeMirror,
+.editor-toolbar,
+.wmd-input,
+.wmd-preview {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+}
+
+.form-control:focus,
+input[type='text']:focus,
+input[type='password']:focus,
+input[type='email']:focus,
+input[type='number']:focus,
+input[type='search']:focus,
+input[type='url']:focus,
+textarea:focus,
+select:focus,
+.CodeMirror-focused {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border-color: #81d4fa !important;
+  color: #fff !important;
+}
+
+input[type='text']::placeholder,
+input[type='password']::placeholder,
+input[type='email']::placeholder,
+input[type='number']::placeholder,
+input[type='search']::placeholder,
+input[type='url']::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+
+select option,
+select optgroup {
+  background: #13202b !important;
+  color: #f8fafc !important;
+}
+
+.problem-container
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+.problem-container textarea,
+.problem-container select,
+.problem-contentpage
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+.problem-contentpage textarea,
+.problem-contentpage select,
+.submission__answer__part__text__value,
+.submission__answer__part__text__value textarea,
+.submission__answer__part__text__value input {
+  background: rgba(15, 23, 42, 0.82) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
+}
+
+.problem-container label,
+.problem-contentpage label,
+.problem-container .control-label,
+.problem-contentpage .control-label,
+.problem-container .help-block,
+.problem-contentpage .help-block,
+.problem-container .text-muted,
+.problem-contentpage .text-muted {
+  color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.problem-container .checkbox label,
+.problem-container .radio label,
+.problem-contentpage .checkbox label,
+.problem-contentpage .radio label {
+  color: #ffffff !important;
+}
+
+.main-footer {
+  background: transparent !important;
+  border-top: none !important;
+  color: #888 !important;
+}
+
+/* =========================================
+   GlassMOOCs Enhancements
+   ========================================= */
+.glassmoocs-char-counter {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  color: rgba(255, 255, 255, 0.8);
+  font-family: monospace;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind] {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  color: #1f2937;
+}
+
+nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind]::before {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--glassmoocs-tab-color);
+  content: '';
+}
+
+html[data-glassmoocs-tab-mode='full']
+  nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind] {
+  background:
+    linear-gradient(
+      135deg,
+      var(--glassmoocs-tab-soft),
+      rgba(255, 255, 255, 0.86)
+    ),
+    var(--glassmoocs-tab-color) !important;
+  box-shadow: inset 0 -3px 0 var(--glassmoocs-tab-color);
+}
+
+html[data-glassmoocs-tab-mode='badge']
+  nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind],
+html[data-glassmoocs-tab-mode='icon']
+  nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind] {
+  background: rgba(255, 255, 255, 0.92) !important;
+  box-shadow: none;
+}
+
+html[data-glassmoocs-tab-mode='badge']
+  nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind]::before {
+  top: 0;
+  width: 54%;
+  height: 5px;
+  border-radius: 0 0 999px 999px;
+}
+
+html[data-glassmoocs-tab-mode='icon']
+  nav[aria-label='page navigation']
+  .pagination
+  > li
+  > a[data-glassmoocs-tab-kind]::before {
+  top: 7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+html[data-glassmoocs-tab-mode='badge']
+  nav[aria-label='page navigation']
+  .pagination
+  > li.active
+  > a[data-glassmoocs-tab-kind],
+html[data-glassmoocs-tab-mode='icon']
+  nav[aria-label='page navigation']
+  .pagination
+  > li.active
+  > a[data-glassmoocs-tab-kind],
+nav[aria-label='page navigation']
+  .pagination
+  > li.active
+  > a[data-glassmoocs-tab-kind] {
+  background: #3c8cff !important;
+  color: #fff !important;
+}
+
+html[data-glassmoocs-tab-mode='badge']
+  nav[aria-label='page navigation']
+  .pagination
+  > li.active
+  > a[data-glassmoocs-tab-kind]::before,
+html[data-glassmoocs-tab-mode='icon']
+  nav[aria-label='page navigation']
+  .pagination
+  > li.active
+  > a[data-glassmoocs-tab-kind]::before {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.glassmoocs-tab-mark {
+  display: none !important;
+}
