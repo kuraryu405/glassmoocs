@@ -4,6 +4,11 @@
   "version": "1.0",
   "description": "MOOCSをグラスモーフィズム化してカッコよくする拡張機能",
   "permissions": ["storage"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "glassmoocs@kuraryu405.github.io"
+    }
+  },
   "options_page": "options.html",
   "action": {
     "default_title": "GlassMOOCs Settings",

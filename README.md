@@ -37,3 +37,17 @@ pnpm build
 5. 読み込み後、アドオン一覧から `設定` を開いてショートカットと色分けを設定する
 
 Firefox の一時アドオンはブラウザ再起動で消えるため、継続利用する場合は署名付きパッケージ化が別途必要です。
+
+## Firefox Add-ons (AMO) で公開する
+
+1. `pnpm run ci` を実行して lint / format / build を通す
+2. 配布用 ZIP を作成する
+   - `cd dist && zip -r ../artifacts/glassmoocs-dist.zip .`
+3. レビュー用ソース ZIP を作成する
+   - `git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD`
+4. [AMO Developer Hub](https://addons.mozilla.org/en-US/developers/) で `Submit a New Add-on` を開く
+5. `On this site` を選択し、`artifacts/glassmoocs-dist.zip` をアップロードする
+6. 必要に応じて source code 提出で `artifacts/glassmoocs-source.zip` をアップロードする
+7. Name / Summary / Description / Category / License / Support 情報 / Notes for reviewers を入力して `Submit Version`
+
+`public/manifest.json` には MV3 提出要件の `browser_specific_settings.gecko.id` を設定済みです。
