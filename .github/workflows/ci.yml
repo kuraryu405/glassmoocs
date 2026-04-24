@@ -29,3 +29,12 @@ jobs:
 
       - name: Run ci
         run: pnpm run ci
+
+      - name: Package dist zip for AMO
+        run: |
+          mkdir -p artifacts
+          cd dist
+          zip -r ../artifacts/glassmoocs-dist.zip .
+
+      - name: Run AMO lint
+        run: pnpm dlx addons-linter artifacts/glassmoocs-dist.zip

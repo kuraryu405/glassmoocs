@@ -17,7 +17,8 @@ pnpm format:check
 pnpm build
 ```
 
-`pnpm run ci` で lint / format check / build をまとめて実行できます。
+`pnpm run ci` で lint / format check / build をまとめて実行できます。  
+GitHub Actions ではこれに加えて、配布用 ZIP の作成と `addons-linter` による AMO 形式チェックも実行します。
 
 ## Chrome に入れる
 
