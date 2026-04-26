@@ -3,7 +3,6 @@
    ========================================= */
 .skin-green,
 .wrapper,
-.content-wrapper,
 html {
   background-color: transparent !important;
   background: transparent !important;
@@ -11,11 +10,26 @@ html {
 
 /* 背景画像（JSで上書きされない場合のデフォルト） */
 body {
+  background-color: #eef2f7 !important;
   background-size: cover;
   background-attachment: fixed;
   background-position: center;
-  color: #e0e0e0 !important;
+  color: #0f172a !important;
   font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+.content-wrapper {
+  background: rgba(255, 255, 255, 0.84) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+html[data-glassmoocs-background='custom'] body {
+  color: #e0e0e0 !important;
+}
+
+html[data-glassmoocs-background='custom'] .content-wrapper {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* =========================================
@@ -24,19 +38,36 @@ body {
 .well,
 .panel,
 .box {
-  background: rgba(20, 20, 20, 0.65) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
   border-radius: 12px !important;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
-  color: #ffffff !important;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.12) !important;
+  color: #0f172a !important;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
 
 .well:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16) !important;
+  border-color: rgba(148, 163, 184, 0.32) !important;
+}
+
+html[data-glassmoocs-background='custom'] .well,
+html[data-glassmoocs-background='custom'] .panel,
+html[data-glassmoocs-background='custom'] .box {
+  background: rgba(20, 20, 20, 0.65) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+  color: #ffffff !important;
+}
+
+html[data-glassmoocs-background='custom'] .well:hover {
   transform: translateY(-4px);
   box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5) !important;
   border-color: rgba(255, 255, 255, 0.3) !important;
@@ -92,8 +123,17 @@ h2,
 h3,
 h4,
 .content-header > h1 {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+html[data-glassmoocs-background='custom'] h1,
+html[data-glassmoocs-background='custom'] h2,
+html[data-glassmoocs-background='custom'] h3,
+html[data-glassmoocs-background='custom'] h4,
+html[data-glassmoocs-background='custom'] .content-header > h1 {
   color: #ffffff !important;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
 .breadcrumb {
@@ -101,10 +141,18 @@ h4,
 }
 
 .breadcrumb > li > a {
-  color: #81d4fa !important;
+  color: #2563eb !important;
 }
 
 .breadcrumb > .active {
+  color: #64748b !important;
+}
+
+html[data-glassmoocs-background='custom'] .breadcrumb > li > a {
+  color: #81d4fa !important;
+}
+
+html[data-glassmoocs-background='custom'] .breadcrumb > .active {
   color: #bbb !important;
 }
 
@@ -140,10 +188,29 @@ select,
 .editor-toolbar,
 .wmd-input,
 .wmd-preview {
+  background-color: rgba(255, 255, 255, 0.82) !important;
+  border: 1px solid rgba(148, 163, 184, 0.26) !important;
+  color: #0f172a !important;
+  border-radius: 8px !important;
+}
+
+html[data-glassmoocs-background='custom'] .form-control,
+html[data-glassmoocs-background='custom'] .form-control[readonly],
+html[data-glassmoocs-background='custom'] input[type='text'],
+html[data-glassmoocs-background='custom'] input[type='password'],
+html[data-glassmoocs-background='custom'] input[type='email'],
+html[data-glassmoocs-background='custom'] input[type='number'],
+html[data-glassmoocs-background='custom'] input[type='search'],
+html[data-glassmoocs-background='custom'] input[type='url'],
+html[data-glassmoocs-background='custom'] textarea,
+html[data-glassmoocs-background='custom'] select,
+html[data-glassmoocs-background='custom'] .CodeMirror,
+html[data-glassmoocs-background='custom'] .editor-toolbar,
+html[data-glassmoocs-background='custom'] .wmd-input,
+html[data-glassmoocs-background='custom'] .wmd-preview {
   background-color: rgba(255, 255, 255, 0.1) !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
   color: #fff !important;
-  border-radius: 8px !important;
 }
 
 .form-control:focus,
@@ -156,8 +223,22 @@ input[type='url']:focus,
 textarea:focus,
 select:focus,
 .CodeMirror-focused {
-  background-color: rgba(255, 255, 255, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.96) !important;
   border-color: #81d4fa !important;
+  color: #0f172a !important;
+}
+
+html[data-glassmoocs-background='custom'] .form-control:focus,
+html[data-glassmoocs-background='custom'] input[type='text']:focus,
+html[data-glassmoocs-background='custom'] input[type='password']:focus,
+html[data-glassmoocs-background='custom'] input[type='email']:focus,
+html[data-glassmoocs-background='custom'] input[type='number']:focus,
+html[data-glassmoocs-background='custom'] input[type='search']:focus,
+html[data-glassmoocs-background='custom'] input[type='url']:focus,
+html[data-glassmoocs-background='custom'] textarea:focus,
+html[data-glassmoocs-background='custom'] select:focus,
+html[data-glassmoocs-background='custom'] .CodeMirror-focused {
+  background-color: rgba(255, 255, 255, 0.2) !important;
   color: #fff !important;
 }
 
@@ -168,11 +249,27 @@ input[type='number']::placeholder,
 input[type='search']::placeholder,
 input[type='url']::placeholder,
 textarea::placeholder {
+  color: rgba(71, 85, 105, 0.8) !important;
+}
+
+html[data-glassmoocs-background='custom'] input[type='text']::placeholder,
+html[data-glassmoocs-background='custom'] input[type='password']::placeholder,
+html[data-glassmoocs-background='custom'] input[type='email']::placeholder,
+html[data-glassmoocs-background='custom'] input[type='number']::placeholder,
+html[data-glassmoocs-background='custom'] input[type='search']::placeholder,
+html[data-glassmoocs-background='custom'] input[type='url']::placeholder,
+html[data-glassmoocs-background='custom'] textarea::placeholder {
   color: rgba(255, 255, 255, 0.65) !important;
 }
 
 select option,
 select optgroup {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html[data-glassmoocs-background='custom'] select option,
+html[data-glassmoocs-background='custom'] select optgroup {
   background: #13202b !important;
   color: #f8fafc !important;
 }
@@ -188,6 +285,29 @@ select optgroup {
 .submission__answer__part__text__value,
 .submission__answer__part__text__value textarea,
 .submission__answer__part__text__value input {
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(148, 163, 184, 0.3) !important;
+}
+
+html[data-glassmoocs-background='custom']
+  .problem-container
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+html[data-glassmoocs-background='custom'] .problem-container textarea,
+html[data-glassmoocs-background='custom'] .problem-container select,
+html[data-glassmoocs-background='custom']
+  .problem-contentpage
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+html[data-glassmoocs-background='custom'] .problem-contentpage textarea,
+html[data-glassmoocs-background='custom'] .problem-contentpage select,
+html[data-glassmoocs-background='custom']
+  .submission__answer__part__text__value,
+html[data-glassmoocs-background='custom']
+  .submission__answer__part__text__value
+  textarea,
+html[data-glassmoocs-background='custom']
+  .submission__answer__part__text__value
+  input {
   background: rgba(15, 23, 42, 0.82) !important;
   color: #f8fafc !important;
   border: 1px solid rgba(148, 163, 184, 0.35) !important;
@@ -201,6 +321,17 @@ select optgroup {
 .problem-contentpage .help-block,
 .problem-container .text-muted,
 .problem-contentpage .text-muted {
+  color: rgba(15, 23, 42, 0.8) !important;
+}
+
+html[data-glassmoocs-background='custom'] .problem-container label,
+html[data-glassmoocs-background='custom'] .problem-contentpage label,
+html[data-glassmoocs-background='custom'] .problem-container .control-label,
+html[data-glassmoocs-background='custom'] .problem-contentpage .control-label,
+html[data-glassmoocs-background='custom'] .problem-container .help-block,
+html[data-glassmoocs-background='custom'] .problem-contentpage .help-block,
+html[data-glassmoocs-background='custom'] .problem-container .text-muted,
+html[data-glassmoocs-background='custom'] .problem-contentpage .text-muted {
   color: rgba(255, 255, 255, 0.88) !important;
 }
 
@@ -208,12 +339,23 @@ select optgroup {
 .problem-container .radio label,
 .problem-contentpage .checkbox label,
 .problem-contentpage .radio label {
+  color: #0f172a !important;
+}
+
+html[data-glassmoocs-background='custom'] .problem-container .checkbox label,
+html[data-glassmoocs-background='custom'] .problem-container .radio label,
+html[data-glassmoocs-background='custom'] .problem-contentpage .checkbox label,
+html[data-glassmoocs-background='custom'] .problem-contentpage .radio label {
   color: #ffffff !important;
 }
 
 .main-footer {
   background: transparent !important;
   border-top: none !important;
+  color: #475569 !important;
+}
+
+html[data-glassmoocs-background='custom'] .main-footer {
   color: #888 !important;
 }
 
@@ -342,4 +484,134 @@ html[data-glassmoocs-tab-mode='icon']
 
 .glassmoocs-tab-mark {
   display: none !important;
+}
+
+.glassmoocs-download-panel {
+  display: grid;
+  gap: 12px;
+  margin: 0 15px 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(56, 189, 248, 0.18),
+      transparent 38%
+    ),
+    rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.1);
+  color: #0f172a !important;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-panel {
+  border-color: rgba(255, 255, 255, 0.16);
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(56, 189, 248, 0.18),
+      transparent 38%
+    ),
+    rgba(15, 23, 42, 0.58);
+  color: #f8fafc !important;
+}
+
+.glassmoocs-download-copy h2,
+.glassmoocs-download-copy p {
+  margin: 0;
+}
+
+.glassmoocs-download-eyebrow {
+  margin-bottom: 4px !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #0369a1 !important;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-eyebrow {
+  color: #7dd3fc !important;
+}
+
+.glassmoocs-download-copy h2 {
+  font-size: 22px;
+  line-height: 1.2;
+  color: inherit !important;
+}
+
+.glassmoocs-download-context,
+.glassmoocs-download-status {
+  color: rgba(15, 23, 42, 0.8) !important;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-context,
+html[data-glassmoocs-background='custom'] .glassmoocs-download-status {
+  color: rgba(248, 250, 252, 0.88) !important;
+}
+
+.glassmoocs-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.glassmoocs-download-button {
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.92);
+  color: #0f172a;
+  font-weight: 600;
+  padding: 10px 14px;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.glassmoocs-download-button.primary {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-button {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-button.primary {
+  background: rgba(56, 189, 248, 0.24);
+}
+
+.glassmoocs-download-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+}
+
+.glassmoocs-download-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+.glassmoocs-download-status {
+  font-size: 13px;
+}
+
+@media (max-width: 767px) {
+  .glassmoocs-download-panel {
+    margin: 0 10px 14px;
+    padding: 14px;
+  }
+
+  .glassmoocs-download-actions {
+    flex-direction: column;
+  }
+
+  .glassmoocs-download-button {
+    width: 100%;
+    text-align: left;
+  }
 }
