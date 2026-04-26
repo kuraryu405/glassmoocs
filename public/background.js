@@ -22,8 +22,8 @@
   };
   const CAPTURE_PERMISSION_ORIGIN = '<all_urls>';
   const CAPTURE_QUALITY = 92;
-  const CAPTURE_INTERVAL_MS = 600;
-  const CAPTURE_REACTIVATE_DELAY_MS = 900;
+  const CAPTURE_INTERVAL_MS = 250;
+  const CAPTURE_REACTIVATE_DELAY_MS = 500;
   const api = globalThis.browser || globalThis.chrome;
 
   let queueNonce = 0;
@@ -76,33 +76,6 @@
     return new Promise((resolve, reject) => {
       try {
         api.storage.local.set(value, () => {
-          const error = getRuntimeLastError();
-          if (error) {
-            reject(new Error(error.message));
-            return;
-          }
-
-          resolve();
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  function storageRemove(keys) {
-    try {
-      const result = api.storage.local.remove(keys);
-      if (result && typeof result.then === 'function') {
-        return result.then(() => {});
-      }
-    } catch {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        api.storage.local.remove(keys, () => {
           const error = getRuntimeLastError();
           if (error) {
             reject(new Error(error.message));
@@ -593,42 +566,24 @@
     };
   }
 
-  async function downloadStoredPdf(pdfStorageKey, fallbackFilename) {
-    const storageResult = await storageGet([pdfStorageKey]);
-    const pdfData = storageResult[pdfStorageKey];
-
-    if (!pdfData?.pdfBase64) {
-      throw new Error('storage から PDF データを取得できませんでした。');
-    }
-
-    const binaryStr = atob(pdfData.pdfBase64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let index = 0; index < binaryStr.length; index += 1) {
-      bytes[index] = binaryStr.charCodeAt(index);
-    }
-
-    const blob = new Blob([bytes], { type: 'application/pdf' });
+  async function downloadPdfBytes(pdfBytes, filename) {
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
 
     try {
-      const storedFilename = normalizeText(
-        pdfData.filename,
-        normalizeText(fallbackFilename, 'slides.pdf'),
-      );
       const downloadId = await downloadFile({
         url: blobUrl,
-        filename: storedFilename,
+        filename: normalizeText(filename, 'slides.pdf'),
         conflictAction: 'uniquify',
         saveAs: false,
       });
       await waitForDownloadCompletion(downloadId);
       return {
         downloadId,
-        storedFilename,
+        storedFilename: normalizeText(filename, 'slides.pdf'),
       };
     } finally {
       URL.revokeObjectURL(blobUrl);
-      await storageRemove([pdfStorageKey]).catch(() => {});
     }
   }
 
@@ -732,18 +687,6 @@
     }
 
     throw new Error(`download timeout: ${downloadId}`);
-  }
-
-  function uint8ArrayToBase64(bytes) {
-    let binary = '';
-    const chunkSize = 0x8000;
-
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-      const chunk = bytes.subarray(index, index + chunkSize);
-      binary += String.fromCharCode(...chunk);
-    }
-
-    return btoa(binary);
   }
 
   function concatUint8Arrays(chunks) {
@@ -988,16 +931,6 @@
     return concatUint8Arrays(chunks);
   }
 
-  async function storePdfBytes(storageKey, filename, pdfBytes) {
-    await storageSet({
-      [storageKey]: {
-        filename,
-        pdfBase64: uint8ArrayToBase64(pdfBytes),
-        createdAt: new Date().toISOString(),
-      },
-    });
-  }
-
   async function ensureCaptureTabActive(tabId, windowId, alreadyRecovered) {
     const activeTabs = await tabsQuery({ active: true, windowId });
     if (activeTabs[0]?.id === tabId) {
@@ -1196,9 +1129,7 @@
           });
 
           const pdfBytes = createPdfFromJpegs(capturedPages);
-          const pdfStorageKey = `glassmoocs_generated_pdf_${entry.id}_${Date.now()}`;
-          await storePdfBytes(pdfStorageKey, filename, pdfBytes);
-          return await downloadStoredPdf(pdfStorageKey, filename);
+          return await downloadPdfBytes(pdfBytes, filename);
         } finally {
           await closeTabQuietly(tabId);
         }

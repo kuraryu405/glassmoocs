@@ -1,4 +1,9 @@
 (function () {
+  if (globalThis.__glassmoocsContentBooted) {
+    return;
+  }
+  globalThis.__glassmoocsContentBooted = true;
+
   const BACKGROUND_STORAGE_KEY = 'glassmoocs_background_image';
   const LEGACY_BACKGROUND_STORAGE_KEY = 'iniad_bg_image';
   const SETTINGS_STORAGE_KEY = 'glassmoocs_settings';

@@ -23,6 +23,7 @@
   );
 
   const CAPTURE_ORIGIN = '<all_urls>';
+  const MOOcs_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
   let currentPageContext = null;
@@ -112,10 +113,128 @@
     });
   }
 
+  function scriptingExecuteScript(details) {
+    if (!api?.scripting?.executeScript) {
+      return Promise.reject(new Error('scripting.executeScript unavailable'));
+    }
+
+    try {
+      const result = api.scripting.executeScript(details);
+      if (result && typeof result.then === 'function') {
+        return result;
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        api.scripting.executeScript(details, (injectionResults) => {
+          const error = getRuntimeLastError();
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve(injectionResults);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function scriptingInsertCss(details) {
+    if (!api?.scripting?.insertCSS) {
+      return Promise.reject(new Error('scripting.insertCSS unavailable'));
+    }
+
+    try {
+      const result = api.scripting.insertCSS(details);
+      if (result && typeof result.then === 'function') {
+        return result.then(() => {});
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        api.scripting.insertCSS(details, () => {
+          const error = getRuntimeLastError();
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve();
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   function normalizeText(value, fallback = '') {
     if (typeof value !== 'string') return fallback;
     const normalized = value.replace(/\s+/g, ' ').trim();
     return normalized || fallback;
+  }
+
+  function isMoocsUrl(rawUrl) {
+    return typeof rawUrl === 'string' && rawUrl.startsWith(MOOcs_ORIGIN_PREFIX);
+  }
+
+  async function ensureMoocsContentReady(activeTab) {
+    if (!activeTab?.id || !isMoocsUrl(activeTab.url)) {
+      return false;
+    }
+
+    try {
+      await scriptingInsertCss({
+        target: { tabId: activeTab.id },
+        files: ['styles.css'],
+      });
+    } catch {
+      // CSS may already be present. Continue to JS injection.
+    }
+
+    await scriptingExecuteScript({
+      target: { tabId: activeTab.id },
+      files: ['content.js'],
+    });
+    return true;
+  }
+
+  async function fetchPageContextWithRecovery(activeTab) {
+    try {
+      return await tabsSendMessage(activeTab.id, {
+        type: MESSAGE_TYPES.getPageContext,
+      });
+    } catch (error) {
+      const message = normalizeText(error?.message);
+      if (!isMoocsUrl(activeTab.url)) {
+        throw error;
+      }
+      if (
+        message &&
+        !/Receiving end does not exist|Could not establish connection|No matching message handler/i.test(
+          message,
+        )
+      ) {
+        throw error;
+      }
+
+      const injected = await ensureMoocsContentReady(activeTab);
+      if (!injected) {
+        throw error;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      return await tabsSendMessage(activeTab.id, {
+        type: MESSAGE_TYPES.getPageContext,
+      });
+    }
   }
 
   function setButtonsDisabled(disabled) {
@@ -185,9 +304,7 @@
       }
 
       currentTabId = activeTab.id;
-      const response = await tabsSendMessage(activeTab.id, {
-        type: MESSAGE_TYPES.getPageContext,
-      });
+      const response = await fetchPageContextWithRecovery(activeTab);
 
       if (!response?.ok || !response.context) {
         currentPageContext = null;
@@ -235,9 +352,23 @@
     downloadStateNode.textContent = '科目収集を開始しています...';
 
     try {
-      const response = await tabsSendMessage(currentTabId, {
-        type: MESSAGE_TYPES.startCourseCollection,
-      });
+      let response;
+      try {
+        response = await tabsSendMessage(currentTabId, {
+          type: MESSAGE_TYPES.startCourseCollection,
+        });
+      } catch {
+        const tabs = await tabsQuery({ active: true, currentWindow: true });
+        const activeTab = tabs[0];
+        if (activeTab?.id === currentTabId) {
+          await ensureMoocsContentReady(activeTab);
+          response = await tabsSendMessage(currentTabId, {
+            type: MESSAGE_TYPES.startCourseCollection,
+          });
+        } else {
+          throw new Error('科目収集対象のタブを再取得できませんでした。');
+        }
+      }
 
       if (!response?.ok) {
         throw new Error(response?.error || '科目収集の開始に失敗しました。');
@@ -260,9 +391,23 @@
     downloadStateNode.textContent = 'このページの資料保存を開始しています...';
 
     try {
-      const response = await tabsSendMessage(currentTabId, {
-        type: MESSAGE_TYPES.downloadCurrentPage,
-      });
+      let response;
+      try {
+        response = await tabsSendMessage(currentTabId, {
+          type: MESSAGE_TYPES.downloadCurrentPage,
+        });
+      } catch {
+        const tabs = await tabsQuery({ active: true, currentWindow: true });
+        const activeTab = tabs[0];
+        if (activeTab?.id === currentTabId) {
+          await ensureMoocsContentReady(activeTab);
+          response = await tabsSendMessage(currentTabId, {
+            type: MESSAGE_TYPES.downloadCurrentPage,
+          });
+        } else {
+          throw new Error('資料保存対象のタブを再取得できませんでした。');
+        }
+      }
 
       if (!response?.ok) {
         throw new Error(response?.error || '資料保存の開始に失敗しました。');
