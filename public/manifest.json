@@ -3,7 +3,9 @@
   "name": "INIAD Glassmorphism",
   "version": "1.0.1",
   "description": "MOOCSをグラスモーフィズム化してカッコよくする拡張機能",
-  "permissions": ["storage"],
+  "permissions": ["storage", "downloads", "tabs", "scripting"],
+  "host_permissions": ["https://moocs.iniad.org/*"],
+  "optional_host_permissions": ["<all_urls>"],
   "browser_specific_settings": {
     "gecko": {
       "id": "iniad-glassmorphism@local",
@@ -12,16 +14,25 @@
       }
     }
   },
+  "background": {
+    "scripts": ["background.js"],
+    "preferred_environment": ["service_worker", "document"],
+    "service_worker": "background.js"
+  },
   "options_page": "options.html",
   "action": {
-    "default_title": "GlassMOOCs Settings",
-    "default_popup": "popup-launcher.html"
+    "default_title": "GlassMOOCs",
+    "default_popup": "popup.html"
   },
   "content_scripts": [
     {
       "matches": ["https://moocs.iniad.org/*"],
       "css": ["styles.css"],
       "js": ["content.js"]
+    },
+    {
+      "matches": ["https://docs.google.com/presentation/*"],
+      "js": ["slides-export.js"]
     }
   ],
   "web_accessible_resources": [

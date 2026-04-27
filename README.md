@@ -60,6 +60,58 @@ zip -r ../artifacts/glassmoocs-dist.zip .
 git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD
 ```
 
+## Build Requirements
+
+- OS: macOS または Linux のシェル環境
+- Verified build environment: macOS 26.3.1 (arm64)
+- Node.js: `v24.14.0` で確認済み
+- Minimum Node.js version: `^20.19.0 || >=22.12.0`
+- Package manager: `pnpm@10.30.2`
+
+Node.js に `corepack` が含まれている場合、`pnpm` は次のコマンドで有効化できます。
+
+```bash
+corepack enable
+corepack prepare pnpm@10.30.2 --activate
+```
+
+## Build Instructions
+
+レビュー提出用の拡張機能コード (`dist/` の中身) をソースコードから再現する手順です。
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run ci
+```
+
+`pnpm run ci` は次の処理を順番に実行します。
+
+- `eslint .`
+- `prettier --check .`
+- `vite build`
+
+ビルド完了後、Firefox / Chrome に読み込む拡張機能コードは `dist/` に出力されます。AMO に提出する配布パッケージは `dist/` の内容を ZIP 化したものです。
+
+例:
+
+```bash
+cd dist
+zip -r ../artifacts/glassmoocs-dist.zip .
+```
+
+## Source Archive Notes
+
+- ソースコード提出用 ZIP には、機械生成された成果物である `dist/` と `artifacts/` を含めません
+- ソースコード提出用 ZIP には、元のソース、設定ファイル、ロックファイル、README を含めます
+- このリポジトリではビルドに `Vite` と `@vitejs/plugin-react` を使用します
+- `public/` 配下のファイルはそのまま拡張機能へコピーされ、`src/options/` 配下の React 設定ページは `vite build` により `dist/` 向けにビルドされます
+
+ソースコード提出用 ZIP の作成例:
+
+```bash
+git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD
+```
+
 ## 開発
 
 ```bash

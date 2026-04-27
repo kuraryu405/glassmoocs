@@ -4,6 +4,20 @@ const LEGACY_BACKGROUND_STORAGE_KEY = 'iniad_bg_image';
 export const COLOR_MODES = {
   full: 'full',
 };
+export const DEFAULT_TAB_COLORS = {
+  attendanceTest: '#f59e0b',
+  attendanceAssignment: '#06b6d4',
+  assignment: '#f43f5e',
+  check: '#8b5cf6',
+  slide: '#38bdf8',
+};
+export const TAB_COLOR_OPTIONS = [
+  { key: 'attendanceTest', label: '出席テスト' },
+  { key: 'attendanceAssignment', label: '出席課題' },
+  { key: 'assignment', label: '課題' },
+  { key: 'check', label: '理解度確認 / テスト / 確認' },
+  { key: 'slide', label: 'スライド / 資料' },
+];
 
 const MODIFIER_KEYS = new Set(['Meta', 'Shift', 'Alt', 'Control']);
 const UNRELIABLE_KEYS = new Set(['Process', 'Unidentified', 'Dead', 'Compose']);
@@ -57,6 +71,7 @@ const DISPLAY_KEY_LABELS = {
  * @property {{previous: Shortcut, next: Shortcut}} shortcuts
  * @property {string} tabColorMode
  * @property {boolean} colorTabsEnabled
+ * @property {{attendanceTest: string, attendanceAssignment: string, assignment: string, check: string, slide: string}} tabColors
  * @property {boolean} reloadAfterSubmit
  */
 
@@ -157,6 +172,7 @@ export function createDefaultSettings() {
     },
     tabColorMode: COLOR_MODES.full,
     colorTabsEnabled: true,
+    tabColors: { ...DEFAULT_TAB_COLORS },
     reloadAfterSubmit: false,
   };
 }
@@ -170,6 +186,28 @@ function mergeShortcut(defaultShortcut, rawShortcut) {
     ...defaultShortcut,
     ...getObjectOrEmpty(rawShortcut),
   };
+}
+
+function normalizeTabColor(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+function mergeTabColors(rawTabColors) {
+  const raw = getObjectOrEmpty(rawTabColors);
+
+  return Object.fromEntries(
+    Object.entries(DEFAULT_TAB_COLORS).map(([key, fallback]) => [
+      key,
+      normalizeTabColor(raw[key], fallback),
+    ]),
+  );
 }
 
 export function mergeSettings(rawSettings) {
@@ -190,6 +228,7 @@ export function mergeSettings(rawSettings) {
       typeof raw.colorTabsEnabled === 'boolean'
         ? raw.colorTabsEnabled
         : defaults.colorTabsEnabled,
+    tabColors: mergeTabColors(raw.tabColors),
     reloadAfterSubmit:
       typeof raw.reloadAfterSubmit === 'boolean'
         ? raw.reloadAfterSubmit
@@ -315,6 +354,13 @@ export function validateSettings(settings) {
   if (previousShortcutId && previousShortcutId === nextShortcutId) {
     errors.push('前のタブと次のタブに同じショートカットは使えません。');
   }
+
+  TAB_COLOR_OPTIONS.forEach(({ key, label }) => {
+    const color = settings.tabColors?.[key];
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
+      errors.push(`${label}の色が不正です。`);
+    }
+  });
 
   return errors;
 }
