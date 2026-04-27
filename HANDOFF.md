@@ -56,33 +56,33 @@ glassmoocs/
 
 ### 動いているもの
 
-| 機能 | 状態 |
-|------|------|
-| manifest: `downloads` / `tabs` / `host_permissions` | ✅ |
-| `background.js` ダウンロードキュー | ✅ |
-| popup → ダウンロード UI | ✅ |
-| content.js: MOOCs URL 解析 | ✅ |
-| content.js: 科目ページ巡回 | ✅ |
-| content.js: 講義一覧抽出 | ✅ |
-| content.js: 資料候補抽出 | ⚠️ 一部のみ（後述）|
-| ディレクトリ構造の生成 | ✅ `year/course/lectureGroup - lectureName/` |
-| 動画・viewer を除外するフィルタ | ✅ |
-| 重複エントリのデデュープ（URL 単位） | ✅ |
-| Google Slides: `manifest.json` に `optional_permissions` で `docs.google.com` 追加 | ✅ |
-| Google Slides: popup に権限要求ボタン追加 | ✅ |
-| Google Slides: SVG 抽出 → Canvas → JPEG → PDF のパイプライン | ✅ `slides-export.js` |
-| Google Slides: `/embed` → `/pub` URL 変換 (`buildSlidesViewerUrl`) | ✅ |
-| Google Slides: `waitForTabLoad` 60 秒タイムアウト | ✅ |
-| `recoverStaleState`: リロード時に前回失敗履歴を引き継がない | ✅ |
+| 機能                                                                               | 状態                                         |
+| ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| manifest: `downloads` / `tabs` / `host_permissions`                                | ✅                                           |
+| `background.js` ダウンロードキュー                                                 | ✅                                           |
+| popup → ダウンロード UI                                                            | ✅                                           |
+| content.js: MOOCs URL 解析                                                         | ✅                                           |
+| content.js: 科目ページ巡回                                                         | ✅                                           |
+| content.js: 講義一覧抽出                                                           | ✅                                           |
+| content.js: 資料候補抽出                                                           | ⚠️ 一部のみ（後述）                          |
+| ディレクトリ構造の生成                                                             | ✅ `year/course/lectureGroup - lectureName/` |
+| 動画・viewer を除外するフィルタ                                                    | ✅                                           |
+| 重複エントリのデデュープ（URL 単位）                                               | ✅                                           |
+| Google Slides: `manifest.json` に `optional_permissions` で `docs.google.com` 追加 | ✅                                           |
+| Google Slides: popup に権限要求ボタン追加                                          | ✅                                           |
+| Google Slides: SVG 抽出 → Canvas → JPEG → PDF のパイプライン                       | ✅ `slides-export.js`                        |
+| Google Slides: `/embed` → `/pub` URL 変換 (`buildSlidesViewerUrl`)                 | ✅                                           |
+| Google Slides: `waitForTabLoad` 60 秒タイムアウト                                  | ✅                                           |
+| `recoverStaleState`: リロード時に前回失敗履歴を引き継がない                        | ✅                                           |
 
 ### 壊れているもの / 不安定なもの
 
-| 症状 | 推定原因 |
-|------|---------|
+| 症状                                                    | 推定原因                                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | ダウンロード実行時に失敗が大量に積み上がる（87 件など） | `about:blank` タブ問題（後述）が繰り返される。5 回リトライしてもすべて `about:blank` になるケースがある |
-| Google Slides タブが `about:blank` になる | Firefox が `docs.google.com` をインライン展開できないか、tab create のタイミング問題 |
-| 科目によっては PDF がまったく落ちない | `extractAssetCandidates` が viewer HTML を PDF 候補と誤認している可能性 |
-| CI は通る（ESLint / build ともパス） | ただし runtime はまだ不安定 |
+| Google Slides タブが `about:blank` になる               | Firefox が `docs.google.com` をインライン展開できないか、tab create のタイミング問題                    |
+| 科目によっては PDF がまったく落ちない                   | `extractAssetCandidates` が viewer HTML を PDF 候補と誤認している可能性                                 |
+| CI は通る（ESLint / build ともパス）                    | ただし runtime はまだ不安定                                                                             |
 
 ---
 
@@ -131,11 +131,11 @@ glassmoocs/
 
 ### 仮説
 
-| ID | 内容 | 証拠 |
-|----|------|------|
+| ID  | 内容                                                                                                 | 証拠                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | H-A | Firefox が `docs.google.com` のナビゲーションを `about:blank` にリダイレクトしている（権限が未付与） | `optional_permissions` を付与していないとコンテンツスクリプトが注入できない。ただしタブ自体は開けるはず |
-| H-B | `tabsCreate` の直後に `waitForTabLoad` を始めるが、タブがまだ作成中で URL が確定していない | Firefox では `tabs.create` の Promise 解決時点で URL が `about:blank` のことがある |
-| H-C | `buildSlidesViewerUrl` の URL が何らかの理由で空文字になっており、`about:blank` タブが作られる | ログで `viewerUrl` を確認していない |
+| H-B | `tabsCreate` の直後に `waitForTabLoad` を始めるが、タブがまだ作成中で URL が確定していない           | Firefox では `tabs.create` の Promise 解決時点で URL が `about:blank` のことがある                      |
+| H-C | `buildSlidesViewerUrl` の URL が何らかの理由で空文字になっており、`about:blank` タブが作られる       | ログで `viewerUrl` を確認していない                                                                     |
 
 ### 次に試すこと
 
@@ -211,15 +211,15 @@ PY
 
 ## 重要ファイル
 
-| ファイル | 役割 |
-|---------|------|
-| `public/manifest.json` | 権限・popup・background 定義 |
-| `public/background.js` | ダウンロードキュー・保存パス・完了待ち |
-| `public/content.js` | MOOCs DOM 解析・講義巡回・資料候補抽出・ページ内 UI |
-| `public/slides-export.js` | Google Slides ページ内で SVG 抽出 → PDF 生成 |
-| `public/popup.js` | popup 起動・権限要求 |
-| `public/popup.html` | popup UI |
-| `AGENTS.md` | 実装・デバッグルール（必読） |
+| ファイル                  | 役割                                                |
+| ------------------------- | --------------------------------------------------- |
+| `public/manifest.json`    | 権限・popup・background 定義                        |
+| `public/background.js`    | ダウンロードキュー・保存パス・完了待ち              |
+| `public/content.js`       | MOOCs DOM 解析・講義巡回・資料候補抽出・ページ内 UI |
+| `public/slides-export.js` | Google Slides ページ内で SVG 抽出 → PDF 生成        |
+| `public/popup.js`         | popup 起動・権限要求                                |
+| `public/popup.html`       | popup UI                                            |
+| `AGENTS.md`               | 実装・デバッグルール（必読）                        |
 
 ---
 

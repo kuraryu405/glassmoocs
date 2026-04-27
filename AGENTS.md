@@ -13,11 +13,11 @@
 
 **関連ドキュメント（役割分担）**
 
-| ファイル | 用途 |
-|----------|------|
-| 本ファイル | 恒久的なアーキテクチャ・型・メッセージ・ルール |
+| ファイル                   | 用途                                                         |
+| -------------------------- | ------------------------------------------------------------ |
+| 本ファイル                 | 恒久的なアーキテクチャ・型・メッセージ・ルール               |
 | [`HANDOFF.md`](HANDOFF.md) | 現在のブランチ・バグ状況・次に触るべき箇所のスナップショット |
-| [`PLAN.md`](PLAN.md) | フェーズ単位の Todo / Done |
+| [`PLAN.md`](PLAN.md)       | フェーズ単位の Todo / Done                                   |
 
 ---
 
@@ -62,26 +62,26 @@ flowchart LR
 
 ### [`public/content.js`](public/content.js)
 
-| 領域 | 代表関数 |
-|------|-----------|
-| 設定 | `getDefaultSettings`, `mergeSettings`, `readSettings` |
-| ページ装飾 | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls` |
-| URL / ページ文脈 | `parseMoocsUrl`, `getCurrentPageContext`, `extractCourseName`, `extractLectureName` |
-| 資料抽出 | `extractAssetCandidates`, `extractLectureEntries`, `extractPageEntries`, `isGoogleSlidesUrl`, `buildGoogleSlidesViewerUrl`, `deriveGoogleDriveDownloadUrl` |
-| ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleCurrentPageDownloadRequest`, `createCollectingState` |
-| メッセージ | `handleRuntimeMessage` |
+| 領域                  | 代表関数                                                                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 設定                  | `getDefaultSettings`, `mergeSettings`, `readSettings`                                                                                                      |
+| ページ装飾            | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls`                                              |
+| URL / ページ文脈      | `parseMoocsUrl`, `getCurrentPageContext`, `extractCourseName`, `extractLectureName`                                                                        |
+| 資料抽出              | `extractAssetCandidates`, `extractLectureEntries`, `extractPageEntries`, `isGoogleSlidesUrl`, `buildGoogleSlidesViewerUrl`, `deriveGoogleDriveDownloadUrl` |
+| ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleCurrentPageDownloadRequest`, `createCollectingState`              |
+| メッセージ            | `handleRuntimeMessage`                                                                                                                                     |
 
 ### [`public/background.js`](public/background.js)
 
-| 領域 | 代表関数 |
-|------|-----------|
-| ストレージラッパ | `storageGet`, `storageSet`, `loadState`, `saveState` |
-| 状態復旧 | `recoverStaleState`, `normalizeState`, `createIdleState` |
-| キュー | `queueDownloads`, `processDirectDownload`, `processSlidesDownload` |
-| Slides URL | `buildSlidesViewerUrl`, `buildSlidesExportUrl`, `buildSlidesPdfExportUrl` |
-| Slides ジョブ | `registerSlidesJob`, `waitForTabLoad`, `sendTabMessageWithRetry`, `downloadStoredPdf` |
-| パス | `buildDownloadFilename`, `buildLectureDirectory`, `sanitizePathSegment`, `normalizeEntry`, `summarizeEntry` |
-| メッセージ | `runtime.onMessage` リスナー（`MESSAGE_TYPES` 分岐） |
+| 領域             | 代表関数                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| ストレージラッパ | `storageGet`, `storageSet`, `loadState`, `saveState`                                                        |
+| 状態復旧         | `recoverStaleState`, `normalizeState`, `createIdleState`                                                    |
+| キュー           | `queueDownloads`, `processDirectDownload`, `processSlidesDownload`                                          |
+| Slides URL       | `buildSlidesViewerUrl`, `buildSlidesExportUrl`, `buildSlidesPdfExportUrl`                                   |
+| Slides ジョブ    | `registerSlidesJob`, `waitForTabLoad`, `sendTabMessageWithRetry`, `downloadStoredPdf`                       |
+| パス             | `buildDownloadFilename`, `buildLectureDirectory`, `sanitizePathSegment`, `normalizeEntry`, `summarizeEntry` |
+| メッセージ       | `runtime.onMessage` リスナー（`MESSAGE_TYPES` 分岐）                                                        |
 
 ### [`public/slides-export.js`](public/slides-export.js)
 
@@ -100,13 +100,13 @@ flowchart LR
 
 ## 4. ストレージスキーマ
 
-| キー | 定義場所 | 内容 |
-|------|-----------|------|
-| `glassmoocs_settings` | content / settings.js | ユーザー設定オブジェクト |
-| `glassmoocs_background_image` | content / settings.js | 背景画像 Data URL 等 |
-| `iniad_bg_image` | レガシー | 旧背景キー（移行用に読む場合あり） |
-| `glassmoocs_download_state` | background / content | **ダウンロード状態**（下記 `DownloadState`） |
-| `glassmoocs_fetched_pdf_*` | background / slides-export | 一時的な PDF base64 ペイロード `{ filename, pdfBase64, createdAt }` |
+| キー                          | 定義場所                   | 内容                                                                |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------- |
+| `glassmoocs_settings`         | content / settings.js      | ユーザー設定オブジェクト                                            |
+| `glassmoocs_background_image` | content / settings.js      | 背景画像 Data URL 等                                                |
+| `iniad_bg_image`              | レガシー                   | 旧背景キー（移行用に読む場合あり）                                  |
+| `glassmoocs_download_state`   | background / content       | **ダウンロード状態**（下記 `DownloadState`）                        |
+| `glassmoocs_fetched_pdf_*`    | background / slides-export | 一時的な PDF base64 ペイロード `{ filename, pdfBase64, createdAt }` |
 
 **禁止**: 本番コードにローカルマシン固有の絶対パスを書かない。
 
@@ -118,37 +118,37 @@ flowchart LR
 
 `background.js` の `createIdleState` / `normalizeState` に準拠する。
 
-| フィールド | 型 | 説明 |
-|------------|-----|------|
-| `status` | string | `idle` / `collecting` / `downloading` / `rendering` / `printing` / `done` / `partial_failed` / `failed` |
-| `courseName` | string | 科目名 |
-| `startedAt` / `finishedAt` | string (ISO) | ジョブの開始・終了時刻 |
-| `activeItem` | string | UI 用。例: `講義名 / ファイル名` |
-| `activeJobType` | string | エントリの `kind` と同じ値が入ることが多い |
-| `sourceUrl` / `viewerUrl` | string | Slides 時の追跡用 |
-| `stage` | string | 例: `open-slides-viewer`, `fetch-slides-pdf`, `svg-export-fallback`, `collect-slide-x/y` 等 |
-| `pending` | `SummarizedEntry[]` | キュー残り（要約形） |
-| `completed` | array | 成功エントリ + `downloadId`, `storedFilename` 等 |
-| `failed` | array | 失敗エントリ + `error`、復旧時は中断メタのみの場合あり |
-| `lastError` | string | 直近エラーメッセージ |
+| フィールド                 | 型                  | 説明                                                                                                    |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `status`                   | string              | `idle` / `collecting` / `downloading` / `rendering` / `printing` / `done` / `partial_failed` / `failed` |
+| `courseName`               | string              | 科目名                                                                                                  |
+| `startedAt` / `finishedAt` | string (ISO)        | ジョブの開始・終了時刻                                                                                  |
+| `activeItem`               | string              | UI 用。例: `講義名 / ファイル名`                                                                        |
+| `activeJobType`            | string              | エントリの `kind` と同じ値が入ることが多い                                                              |
+| `sourceUrl` / `viewerUrl`  | string              | Slides 時の追跡用                                                                                       |
+| `stage`                    | string              | 例: `open-slides-viewer`, `fetch-slides-pdf`, `svg-export-fallback`, `collect-slide-x/y` 等             |
+| `pending`                  | `SummarizedEntry[]` | キュー残り（要約形）                                                                                    |
+| `completed`                | array               | 成功エントリ + `downloadId`, `storedFilename` 等                                                        |
+| `failed`                   | array               | 失敗エントリ + `error`、復旧時は中断メタのみの場合あり                                                  |
+| `lastError`                | string              | 直近エラーメッセージ                                                                                    |
 
 ### 5.2 `DownloadEntry`（キューに載る 1 資料）
 
 `normalizeEntry` の出力に準拠。**`url` が空のエントリは `queueDownloads` で除外される。**
 
-| フィールド | 型 | 説明 |
-|------------|-----|------|
-| `id` | string | 安定した一意 ID（`createAssetId`） |
-| `kind` | string | **`direct_file`**（通常 URL）または **`google_slides`** |
-| `url` | string | ダウンロードに使う URL。Slides では viewer 系 |
-| `sourceUrl` | string | ページ上の元 `href` / `iframe.src` 等 |
-| `viewerUrl` | string | Slides の埋め込み URL。background で `/pub` 等に変換される元になる |
-| `filename` | string | 拡張子付きファイル名（パスセグメントではない） |
-| `year` | string | 保存パス用。例 `2026` |
-| `lectureGroup` | string | 講義グループ名 |
-| `lectureName` | string | 講義名 |
-| `pageTitle` | string | ページタイトル由来のラベル |
-| `source` | string | `anchor` / `iframe` / `embed` / `object` 等（抽出元） |
+| フィールド     | 型     | 説明                                                               |
+| -------------- | ------ | ------------------------------------------------------------------ |
+| `id`           | string | 安定した一意 ID（`createAssetId`）                                 |
+| `kind`         | string | **`direct_file`**（通常 URL）または **`google_slides`**            |
+| `url`          | string | ダウンロードに使う URL。Slides では viewer 系                      |
+| `sourceUrl`    | string | ページ上の元 `href` / `iframe.src` 等                              |
+| `viewerUrl`    | string | Slides の埋め込み URL。background で `/pub` 等に変換される元になる |
+| `filename`     | string | 拡張子付きファイル名（パスセグメントではない）                     |
+| `year`         | string | 保存パス用。例 `2026`                                              |
+| `lectureGroup` | string | 講義グループ名                                                     |
+| `lectureName`  | string | 講義名                                                             |
+| `pageTitle`    | string | ページタイトル由来のラベル                                         |
+| `source`       | string | `anchor` / `iframe` / `embed` / `object` 等（抽出元）              |
 
 `queueDownloads` 内では **`viewerUrl || url` をキーにデデュープ**（先着優先）。
 
@@ -166,33 +166,33 @@ flowchart LR
 
 いずれも **`tabs.sendMessage(moocsTabId, message)`** で届く（popup がアクティブタブに送信）。`fetch-pdf` のみ background から Slides タブではなく **MOOCs タブ**へ送る想定の経路として content に実装がある。
 
-| type | 送信元 | `message` 主フィールド | `sendResponse` |
-|------|--------|------------------------|----------------|
-| `glassmoocs:get-page-context` | popup | なし | `{ ok, context }` — `getCurrentPageContext(document, location.href)` |
-| `glassmoocs:start-course-collection` | popup | なし | `{ ok, courseName, assetCount }` / `{ ok:false, error }` |
-| `glassmoocs:download-current-page` | popup | なし | 同上 |
-| `glassmoocs:fetch-pdf` | background 等 | `url` | `{ ok, data, contentType }`（base64）または `{ ok:false, error }` — **MOOCs オリジン上**の fetch（`credentials: 'omit'`） |
+| type                                 | 送信元        | `message` 主フィールド | `sendResponse`                                                                                                            |
+| ------------------------------------ | ------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `glassmoocs:get-page-context`        | popup         | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)`                                                      |
+| `glassmoocs:start-course-collection` | popup         | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`                                                                  |
+| `glassmoocs:download-current-page`   | popup         | なし                   | 同上                                                                                                                      |
+| `glassmoocs:fetch-pdf`               | background 等 | `url`                  | `{ ok, data, contentType }`（base64）または `{ ok:false, error }` — **MOOCs オリジン上**の fetch（`credentials: 'omit'`） |
 
 ### 6.2 `background.js` が処理する `type`
 
 **`runtime.sendMessage`** で届く（popup の状態取得・リセット、content の `set-download-state` / `download-assets` 等）。
 
-| type | 送信元 | 主フィールド | `sendResponse` / 挙動 |
-|------|--------|--------------|------------------------|
-| `glassmoocs:get-download-state` | popup / content | なし | async `{ ok, state }` |
-| `glassmoocs:set-download-state` | content | `state` | async `{ ok, state }` |
-| `glassmoocs:reset-download-state` | popup / content | なし | async `{ ok, state }`（`queueNonce` インクリメント） |
-| `glassmoocs:download-assets` | content | **`payload`**: `{ courseName, assets: DownloadEntry[] }` | 即時 `{ ok:true }` の後 **`queueDownloads` を非同期実行**（失敗時は state を `failed` に） |
-| `glassmoocs:slides-ready` | slides-export.js | `jobId`, `filename`, `pdfStorageKey` | `registerSlidesJob` の Promise を resolve |
-| `glassmoocs:slides-progress` | slides-export.js | `jobId`, `stage` | state を `rendering` に更新 |
-| `glassmoocs:slides-failed` | slides-export.js | `jobId`, `error` | ジョブ reject |
+| type                              | 送信元           | 主フィールド                                             | `sendResponse` / 挙動                                                                      |
+| --------------------------------- | ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `glassmoocs:get-download-state`   | popup / content  | なし                                                     | async `{ ok, state }`                                                                      |
+| `glassmoocs:set-download-state`   | content          | `state`                                                  | async `{ ok, state }`                                                                      |
+| `glassmoocs:reset-download-state` | popup / content  | なし                                                     | async `{ ok, state }`（`queueNonce` インクリメント）                                       |
+| `glassmoocs:download-assets`      | content          | **`payload`**: `{ courseName, assets: DownloadEntry[] }` | 即時 `{ ok:true }` の後 **`queueDownloads` を非同期実行**（失敗時は state を `failed` に） |
+| `glassmoocs:slides-ready`         | slides-export.js | `jobId`, `filename`, `pdfStorageKey`                     | `registerSlidesJob` の Promise を resolve                                                  |
+| `glassmoocs:slides-progress`      | slides-export.js | `jobId`, `stage`                                         | state を `rendering` に更新                                                                |
+| `glassmoocs:slides-failed`        | slides-export.js | `jobId`, `error`                                         | ジョブ reject                                                                              |
 
 ### 6.3 `slides-export.js` が処理する `type`（`tabs.sendMessage` で届く）
 
-| type | 送信元 | 主フィールド | `sendResponse` |
-|------|--------|--------------|----------------|
-| `glassmoocs:fetch-pdf` | background | `url`, `storageKey`, `filename` | `{ ok, pdfStorageKey, filename }` または失敗時 `{ ok:false, error }` — **同一サイト `fetch` + `storage.local` 書き込み** |
-| `glassmoocs:start-slides-export` | background | `jobId`, `filename` | 非同期。成功 `{ ok:true }`、失敗時 `slidesFailed` も送信 |
+| type                             | 送信元     | 主フィールド                    | `sendResponse`                                                                                                           |
+| -------------------------------- | ---------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `glassmoocs:fetch-pdf`           | background | `url`, `storageKey`, `filename` | `{ ok, pdfStorageKey, filename }` または失敗時 `{ ok:false, error }` — **同一サイト `fetch` + `storage.local` 書き込み** |
+| `glassmoocs:start-slides-export` | background | `jobId`, `filename`             | 非同期。成功 `{ ok:true }`、失敗時 `slidesFailed` も送信                                                                 |
 
 ---
 
@@ -258,12 +258,12 @@ stateDiagram-v2
 
 ### 9.2 DO / DON'T（事故防止）
 
-| DO | DON'T |
-|----|--------|
-| Slides を別タブで開く URL は **`buildSlidesViewerUrl` 経由の viewer** を使う | `/embed` のまま「読み込み complete を待つ」だけに依存しない |
-| 大きな PDF バイナリは **`storage.local` + キー返却** | runtime message のみで巨大 base64 をやり取りしない |
-| デバッグログは **JSON 一行＋仮説 ID** | 本番に不要な `console.log` だけで終わらせない（必要なら後で削除） |
-| ログ受け口は **`nc -l 7442` 等 POST を記録できるもの** | `python3 -m http.server 7442` だけを「取れる」と思わない |
+| DO                                                                           | DON'T                                                             |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Slides を別タブで開く URL は **`buildSlidesViewerUrl` 経由の viewer** を使う | `/embed` のまま「読み込み complete を待つ」だけに依存しない       |
+| 大きな PDF バイナリは **`storage.local` + キー返却**                         | runtime message のみで巨大 base64 をやり取りしない                |
+| デバッグログは **JSON 一行＋仮説 ID**                                        | 本番に不要な `console.log` だけで終わらせない（必要なら後で削除） |
+| ログ受け口は **`nc -l 7442` 等 POST を記録できるもの**                       | `python3 -m http.server 7442` だけを「取れる」と思わない          |
 
 ---
 
@@ -321,14 +321,14 @@ fetch('http://127.0.0.1:7442/ingest/<セッションID>', {
 
 ### 13.2 ログを置く場所
 
-| 場所 | 記録内容 |
-|------|-----------|
-| 非同期関数の入口 | 引数・呼び出し元識別子 |
-| `await` 直前 / 直後 | 投入値・返却値・例外 |
-| 条件分岐 | どの branch か + 判定に使った変数 |
-| `catch` | `error.message`, `error.name`, stack |
-| タブ作成・削除 | `tabId`, URL, 理由 |
-| `browser.storage` | key、値は大きければ型と長さ |
+| 場所                | 記録内容                             |
+| ------------------- | ------------------------------------ |
+| 非同期関数の入口    | 引数・呼び出し元識別子               |
+| `await` 直前 / 直後 | 投入値・返却値・例外                 |
+| 条件分岐            | どの branch か + 判定に使った変数    |
+| `catch`             | `error.message`, `error.name`, stack |
+| タブ作成・削除      | `tabId`, URL, 理由                   |
+| `browser.storage`   | key、値は大きければ型と長さ          |
 
 ### 13.3 仮説 ID
 
@@ -361,11 +361,11 @@ fetch('http://127.0.0.1:7442/ingest/<セッションID>', {
 
 ### 13.6 Firefox でのログの見方
 
-| スクリプト | 見る場所 |
-|------------|-----------|
-| background | `about:debugging` → 拡張 → **調査** |
-| content（MOOCs） | 該当 MOOCs タブの DevTools |
-| slides-export | **`docs.google.com` を表示しているタブ**の DevTools |
+| スクリプト       | 見る場所                                            |
+| ---------------- | --------------------------------------------------- |
+| background       | `about:debugging` → 拡張 → **調査**                 |
+| content（MOOCs） | 該当 MOOCs タブの DevTools                          |
+| slides-export    | **`docs.google.com` を表示しているタブ**の DevTools |
 
 拡張リロードで background のコンソールはリセットされる。**リロード前後でログを分けて記録する。**
 
@@ -392,12 +392,12 @@ fetch('http://127.0.0.1:7442/ingest/<セッションID>', {
 
 詳細は [`HANDOFF.md`](HANDOFF.md) を見よ。ここでは **エージェントがハマりやすい論点**だけ列挙する。
 
-| 論点 | 内容 |
-|------|------|
+| 論点                   | 内容                                                                                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`about:blank` タブ** | `processSlidesDownload` で `waitForTabLoad` 後も URL が `about:blank` のままになることがある。権限・URL 組み立て・タイミングの仮説でログを取ること。 |
-| **Slides URL** | `buildSlidesViewerUrl` が **embed → pub / present** 変換の要。ここを迂回するとタイムアウトしやすい。 |
-| **候補の誤検出** | `extractAssetCandidates` が viewer HTML や動画を掴む可能性 — フィルタ強化は PDF / Slides 明示に寄せるとよい。 |
-| **状態の蓄積** | `recoverStaleState` で「リロード前の大量 failed」は引き継がない設計。それでも失敗が増える場合は **実行時の例外ループ**を疑う。 |
+| **Slides URL**         | `buildSlidesViewerUrl` が **embed → pub / present** 変換の要。ここを迂回するとタイムアウトしやすい。                                                 |
+| **候補の誤検出**       | `extractAssetCandidates` が viewer HTML や動画を掴む可能性 — フィルタ強化は PDF / Slides 明示に寄せるとよい。                                        |
+| **状態の蓄積**         | `recoverStaleState` で「リロード前の大量 failed」は引き継がない設計。それでも失敗が増える場合は **実行時の例外ループ**を疑う。                       |
 
 ---
 
