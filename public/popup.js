@@ -21,12 +21,16 @@
   const grantSlidesPermissionButton = document.getElementById(
     'grant-slides-permission-button',
   );
+  const slidesPermissionStatusNode = document.getElementById(
+    'slides-permission-status',
+  );
 
   const CAPTURE_ORIGIN = '<all_urls>';
   const MOOcs_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
   let currentPageContext = null;
+  let currentDownloadState = null;
 
   function getRuntimeLastError() {
     return globalThis.chrome?.runtime?.lastError || null;
@@ -290,6 +294,29 @@
     return lines.join('\n') || 'このページの情報を判定できませんでした。';
   }
 
+  const slidesPermissionCardController =
+    globalThis.__glassmoocsCreateSlidesPermissionCardController({
+      api,
+      captureOrigin: CAPTURE_ORIGIN,
+      getCurrentDownloadState() {
+        return currentDownloadState;
+      },
+      getRuntimeLastError,
+      grantSlidesPermissionButton,
+      normalizeText,
+      setCurrentDownloadState(nextState) {
+        currentDownloadState = nextState;
+      },
+      setDownloadStateMessage(message) {
+        downloadStateNode.textContent = message;
+      },
+      slidesPermissionCard,
+      slidesPermissionStatusNode,
+    });
+
+  const { checkSlidesPermission, handleGrantSlidesPermission } =
+    slidesPermissionCardController;
+
   async function loadActivePageContext() {
     try {
       const tabs = await tabsQuery({ active: true, currentWindow: true });
@@ -336,8 +363,11 @@
       const response = await runtimeSendMessage({
         type: MESSAGE_TYPES.getState,
       });
+      currentDownloadState = response?.state || null;
       downloadStateNode.textContent = formatState(response?.state);
+      await checkSlidesPermission();
     } catch (error) {
+      currentDownloadState = null;
       downloadStateNode.textContent = normalizeText(
         error?.message,
         '状態の取得に失敗しました。',
@@ -420,55 +450,6 @@
     } finally {
       await loadActivePageContext();
       await refreshState();
-    }
-  }
-
-  async function checkSlidesPermission() {
-    if (!api?.permissions?.contains || !slidesPermissionCard) return;
-    const hasSlides =
-      Array.isArray(currentPageContext?.assetCandidates) &&
-      currentPageContext.assetCandidates.some(
-        (item) => item.kind === 'google_slides',
-      );
-    if (!hasSlides) {
-      slidesPermissionCard.style.display = 'none';
-      return;
-    }
-
-    try {
-      const granted = await (api.permissions.contains({
-        origins: [CAPTURE_ORIGIN],
-      }) instanceof Promise
-        ? api.permissions.contains({ origins: [CAPTURE_ORIGIN] })
-        : new Promise((resolve) =>
-            api.permissions.contains({ origins: [CAPTURE_ORIGIN] }, resolve),
-          ));
-      slidesPermissionCard.style.display = granted ? 'none' : '';
-    } catch {
-      slidesPermissionCard.style.display = 'none';
-    }
-  }
-
-  async function handleGrantSlidesPermission() {
-    if (!api?.permissions?.request) return;
-
-    try {
-      grantSlidesPermissionButton.disabled = true;
-      const granted = await (api.permissions.request({
-        origins: [CAPTURE_ORIGIN],
-      }) instanceof Promise
-        ? api.permissions.request({ origins: [CAPTURE_ORIGIN] })
-        : new Promise((resolve) =>
-            api.permissions.request({ origins: [CAPTURE_ORIGIN] }, resolve),
-          ));
-      if (granted) {
-        slidesPermissionCard.style.display = 'none';
-        downloadStateNode.textContent = 'Slides キャプチャを許可しました。';
-      }
-    } catch {
-      return;
-    } finally {
-      grantSlidesPermissionButton.disabled = false;
     }
   }
 

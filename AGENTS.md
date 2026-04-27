@@ -46,8 +46,8 @@ flowchart LR
 
 - **content.js**: MOOCs DOM の解析、資料候補の抽出、ページ内ダウンロード UI、`download-assets` ペイロードの組み立て。
 - **background.js**: `storage.local` のダウンロード状態、キュー処理、`downloads.download`、Slides 用タブの生成・`waitForTabLoad`・ジョブ待ち受け。
-- **slides-export.js**: 同一オリジン上での PDF fetch（`fetchPdf`）または SVG→PDF パイプライン。大きな PDF は **`storage.local` に書いてからキーを返す**。
-- **popup.js**: アクティブ MOOCs タブへ **`tabs.sendMessage`**（`get-page-context` / `start-course-collection` / `download-current-page`）。状態取得・リセットは **`runtime.sendMessage`** で background へ。Slides 権限は `permissions.request`。
+- **slides-export.js**: `docs.google.com` 上で Slides SVG を収集・画像をインライン化して、background に渡す。失敗時のみ表示タブキャプチャへフォールバックする。
+- **popup.js**: アクティブ MOOCs タブへ **`tabs.sendMessage`**（`get-page-context` / `start-course-collection` / `download-current-page`）。状態取得・リセットは **`runtime.sendMessage`** で background へ。Slides 権限は popup または専用許可ウィンドウから `permissions.request`。
 
 ---
 
@@ -57,7 +57,7 @@ flowchart LR
 
 - `permissions`: `storage`, `downloads`, `tabs`, `scripting`
 - `host_permissions`: `https://moocs.iniad.org/*`
-- `optional_permissions`: `https://docs.google.com/*`（Slides 利用時にポップアップ等から付与）
+- `optional_host_permissions`: `<all_urls>`（Slides キャプチャ利用時に popup / 専用許可ウィンドウから付与）
 - `content_scripts`: MOOCs + `https://docs.google.com/presentation/*`（後者のみ `slides-export.js`）
 
 ### [`public/content.js`](public/content.js)
@@ -71,26 +71,46 @@ flowchart LR
 | ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleCurrentPageDownloadRequest`, `createCollectingState`              |
 | メッセージ            | `handleRuntimeMessage`                                                                                                                                     |
 
+補助ファイル:
+
+- [`public/content/download-panel.js`](public/content/download-panel.js): ページ内ダウンロードパネルの UI コンポーネント
+
 ### [`public/background.js`](public/background.js)
 
 | 領域             | 代表関数                                                                                                    |
 | ---------------- | ----------------------------------------------------------------------------------------------------------- |
 | ストレージラッパ | `storageGet`, `storageSet`, `loadState`, `saveState`                                                        |
-| 状態復旧         | `recoverStaleState`, `normalizeState`, `createIdleState`                                                    |
+| 状態復旧         | `recoverStaleState`, `recoverStateOnStartup`, `normalizeState`, `createIdleState`                           |
 | キュー           | `queueDownloads`, `processDirectDownload`, `processSlidesDownload`                                          |
-| Slides URL       | `buildSlidesViewerUrl`, `buildSlidesExportUrl`, `buildSlidesPdfExportUrl`                                   |
-| Slides ジョブ    | `registerSlidesJob`, `waitForTabLoad`, `sendTabMessageWithRetry`, `downloadStoredPdf`                       |
+| Slides URL       | `buildSlidesViewerUrl`                                                                                      |
+| Slides ジョブ    | `waitForTabLoad`, `sendTabMessageWithRetry`, `requestSlidesSessionInfo`, `requestSerializeCurrentSlideSvg`  |
 | パス             | `buildDownloadFilename`, `buildLectureDirectory`, `sanitizePathSegment`, `normalizeEntry`, `summarizeEntry` |
 | メッセージ       | `runtime.onMessage` リスナー（`MESSAGE_TYPES` 分岐）                                                        |
 
+補助ファイル:
+
+- [`public/background/pdf.js`](public/background/pdf.js): canvas / JPEG / PDF 組み立てユーティリティ
+
 ### [`public/slides-export.js`](public/slides-export.js)
 
-- `bootExporter`: `fetchPdf`（同一サイト fetch → base64 → `storage.local`）、`startSlidesExport`（非同期 `runExporter`）
+- `waitForSlideReady`, `serializeCurrentSlideSvg`, `inlineSlideImages`, `getSlidesSessionInfo`
 - グローバル二重起動防止: `globalThis.__glassmoocsExporterBooted`
+
+補助ファイル:
+
+- [`public/slides-export/svg-export.js`](public/slides-export/svg-export.js): SVG 直列化と画像インライン化
 
 ### [`public/popup.js`](public/popup.js) / [`public/popup.html`](public/popup.html)
 
-- 進捗表示、収集トリガ、（あれば）`docs.google.com` 権限要求 UI
+- 進捗表示、収集トリガ、（あれば）Slides キャプチャ権限要求 UI
+
+補助ファイル:
+
+- [`public/popup/slides-permission-card.js`](public/popup/slides-permission-card.js): popup 内の Slides 権限カード制御
+
+### [`public/slides-permission.js`](public/slides-permission.js) / [`public/slides-permission.html`](public/slides-permission.html)
+
+- ページ内ダウンロード UI から開く **Slides キャプチャ権限専用ウィンドウ**
 
 ### [`src/options/`](src/options/)
 
@@ -100,13 +120,12 @@ flowchart LR
 
 ## 4. ストレージスキーマ
 
-| キー                          | 定義場所                   | 内容                                                                |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------- |
-| `glassmoocs_settings`         | content / settings.js      | ユーザー設定オブジェクト                                            |
-| `glassmoocs_background_image` | content / settings.js      | 背景画像 Data URL 等                                                |
-| `iniad_bg_image`              | レガシー                   | 旧背景キー（移行用に読む場合あり）                                  |
-| `glassmoocs_download_state`   | background / content       | **ダウンロード状態**（下記 `DownloadState`）                        |
-| `glassmoocs_fetched_pdf_*`    | background / slides-export | 一時的な PDF base64 ペイロード `{ filename, pdfBase64, createdAt }` |
+| キー                          | 定義場所              | 内容                                         |
+| ----------------------------- | --------------------- | -------------------------------------------- |
+| `glassmoocs_settings`         | content / settings.js | ユーザー設定オブジェクト                     |
+| `glassmoocs_background_image` | content / settings.js | 背景画像 Data URL 等                         |
+| `iniad_bg_image`              | レガシー              | 旧背景キー（移行用に読む場合あり）           |
+| `glassmoocs_download_state`   | background / content  | **ダウンロード状態**（下記 `DownloadState`） |
 
 **禁止**: 本番コードにローカルマシン固有の絶対パスを書かない。
 
@@ -131,6 +150,7 @@ flowchart LR
 | `completed`                | array               | 成功エントリ + `downloadId`, `storedFilename` 等                                                        |
 | `failed`                   | array               | 失敗エントリ + `error`、復旧時は中断メタのみの場合あり                                                  |
 | `lastError`                | string              | 直近エラーメッセージ                                                                                    |
+| `needsCapturePermission`   | boolean             | capture fallback が権限不足で止まったとき `true`。popup / ページ内 UI の導線表示に使う                  |
 
 ### 5.2 `DownloadEntry`（キューに載る 1 資料）
 
@@ -150,7 +170,7 @@ flowchart LR
 | `pageTitle`    | string | ページタイトル由来のラベル                                         |
 | `source`       | string | `anchor` / `iframe` / `embed` / `object` 等（抽出元）              |
 
-`queueDownloads` 内では **`viewerUrl || url` をキーにデデュープ**（先着優先）。
+`queueDownloads` 内では **Slides viewer URL / 通常 URL を正規化したキー**でデデュープ（先着優先）。
 
 ### 5.3 `SummarizedEntry`
 
@@ -164,35 +184,37 @@ flowchart LR
 
 ### 6.1 MOOCs `content.js` が処理する `type`
 
-いずれも **`tabs.sendMessage(moocsTabId, message)`** で届く（popup がアクティブタブに送信）。`fetch-pdf` のみ background から Slides タブではなく **MOOCs タブ**へ送る想定の経路として content に実装がある。
+いずれも **`tabs.sendMessage(moocsTabId, message)`** で届く（popup がアクティブタブに送信）。
 
-| type                                 | 送信元        | `message` 主フィールド | `sendResponse`                                                                                                            |
-| ------------------------------------ | ------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `glassmoocs:get-page-context`        | popup         | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)`                                                      |
-| `glassmoocs:start-course-collection` | popup         | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`                                                                  |
-| `glassmoocs:download-current-page`   | popup         | なし                   | 同上                                                                                                                      |
-| `glassmoocs:fetch-pdf`               | background 等 | `url`                  | `{ ok, data, contentType }`（base64）または `{ ok:false, error }` — **MOOCs オリジン上**の fetch（`credentials: 'omit'`） |
+| type                                 | 送信元 | `message` 主フィールド | `sendResponse`                                                       |
+| ------------------------------------ | ------ | ---------------------- | -------------------------------------------------------------------- |
+| `glassmoocs:get-page-context`        | popup  | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)` |
+| `glassmoocs:start-course-collection` | popup  | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`             |
+| `glassmoocs:download-current-page`   | popup  | なし                   | 同上                                                                 |
 
 ### 6.2 `background.js` が処理する `type`
 
 **`runtime.sendMessage`** で届く（popup の状態取得・リセット、content の `set-download-state` / `download-assets` 等）。
 
-| type                              | 送信元           | 主フィールド                                             | `sendResponse` / 挙動                                                                      |
-| --------------------------------- | ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `glassmoocs:get-download-state`   | popup / content  | なし                                                     | async `{ ok, state }`                                                                      |
-| `glassmoocs:set-download-state`   | content          | `state`                                                  | async `{ ok, state }`                                                                      |
-| `glassmoocs:reset-download-state` | popup / content  | なし                                                     | async `{ ok, state }`（`queueNonce` インクリメント）                                       |
-| `glassmoocs:download-assets`      | content          | **`payload`**: `{ courseName, assets: DownloadEntry[] }` | 即時 `{ ok:true }` の後 **`queueDownloads` を非同期実行**（失敗時は state を `failed` に） |
-| `glassmoocs:slides-ready`         | slides-export.js | `jobId`, `filename`, `pdfStorageKey`                     | `registerSlidesJob` の Promise を resolve                                                  |
-| `glassmoocs:slides-progress`      | slides-export.js | `jobId`, `stage`                                         | state を `rendering` に更新                                                                |
-| `glassmoocs:slides-failed`        | slides-export.js | `jobId`, `error`                                         | ジョブ reject                                                                              |
+| type                                               | 送信元           | 主フィールド                                             | `sendResponse` / 挙動                                                                      |
+| -------------------------------------------------- | ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `glassmoocs:get-download-state`                    | popup / content  | なし                                                     | async `{ ok, state }`                                                                      |
+| `glassmoocs:set-download-state`                    | content          | `state`                                                  | async `{ ok, state }`                                                                      |
+| `glassmoocs:reset-download-state`                  | popup / content  | なし                                                     | async `{ ok, state }`（`queueNonce` インクリメント）                                       |
+| `glassmoocs:download-assets`                       | content          | **`payload`**: `{ courseName, assets: DownloadEntry[] }` | 即時 `{ ok:true }` の後 **`queueDownloads` を非同期実行**（失敗時は state を `failed` に） |
+| `glassmoocs:get-slides-capture-permission`         | popup / content  | なし                                                     | async `{ ok, granted }`                                                                    |
+| `glassmoocs:open-slides-capture-permission-window` | content          | なし                                                     | async `{ ok, windowId }`                                                                   |
+| `glassmoocs:fetch-image-data-url`                  | slides-export.js | `url`                                                    | async `{ ok, dataUrl }`。Slides タブ内 fetch が失敗した画像を background 経由で取得        |
 
 ### 6.3 `slides-export.js` が処理する `type`（`tabs.sendMessage` で届く）
 
-| type                             | 送信元     | 主フィールド                    | `sendResponse`                                                                                                           |
-| -------------------------------- | ---------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `glassmoocs:fetch-pdf`           | background | `url`, `storageKey`, `filename` | `{ ok, pdfStorageKey, filename }` または失敗時 `{ ok:false, error }` — **同一サイト `fetch` + `storage.local` 書き込み** |
-| `glassmoocs:start-slides-export` | background | `jobId`, `filename`             | 非同期。成功 `{ ok:true }`、失敗時 `slidesFailed` も送信                                                                 |
+| type                                     | 送信元     | 主フィールド               | `sendResponse`                                                                                         |
+| ---------------------------------------- | ---------- | -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `glassmoocs:get-slides-session-info`     | background | なし                       | `{ ok, totalPages, currentPage, title }`                                                               |
+| `glassmoocs:wait-for-slide-ready`        | background | `page`, `previousSnapshot` | `{ ok, snapshot, captureMetrics, waitDurationMs }` または `{ ok:false, error }`                        |
+| `glassmoocs:go-to-first-slide`           | background | なし                       | `{ ok:true }` / `{ ok:false, error }`                                                                  |
+| `glassmoocs:go-to-slide`                 | background | `page`                     | `{ ok:true }` / `{ ok:false, error }`                                                                  |
+| `glassmoocs:serialize-current-slide-svg` | background | `page`                     | `{ ok, svgText, renderWidth, renderHeight, viewBoxWidth, viewBoxHeight }` または `{ ok:false, error }` |
 
 ---
 
@@ -228,11 +250,11 @@ stateDiagram-v2
 
 ## 8. Google Slides 処理フロー（読む順）
 
-1. **`permissions.contains({ origins: ['https://docs.google.com/*'] })`** — 未付与ならユーザーにポップアップから付与してもらう。
-2. **`buildSlidesExportUrl(entry)`** → 内部で **`buildSlidesViewerUrl`**。`/embed`・`/pubembed` は **`/pub`**、private `/presentation/d/{id}/embed` は **`/present`** に寄せる（`waitForTabLoad` が `complete` になりにくい問題の対策）。
+1. **`permissions.contains({ origins: ['<all_urls>'] })`** — 未付与ならページ内 UI・popup・専用許可ウィンドウのいずれかから付与してもらう。
+2. **`buildSlidesViewerUrl(entry)`**。`/embed`・`/pubembed` は **`/pub`**、private `/presentation/d/{id}/embed` は **`/present`** に寄せる（`waitForTabLoad` が `complete` になりにくい問題の対策）。
 3. **`tabs.create({ url: viewerUrl })`** — `about:blank` のまま固まる場合は最大 5 回リトライ（2 秒間隔）。
-4. **`buildSlidesPdfExportUrl`** が取れたら **`fetchPdf`** を Slides タブに送り、**`storage.local` の一時キー**経由で `downloadStoredPdf`。
-5. 失敗時は **`startSlidesExport`** → exporter が進捗で `slides-progress`、完了で `slides-ready`（**PDF は再び storage キーで返す**）。
+4. まず Slides タブ上の SVG を順に直列化し、画像を data URL にインライン化して background へ返す。
+5. background 側で SVG を JPEG 化して PDF を組み立てる。失敗時のみ `captureVisibleTab` フォールバックへ落とす。
 6. **`finally` でタブを閉じる**。
 
 ---
@@ -258,12 +280,12 @@ stateDiagram-v2
 
 ### 9.2 DO / DON'T（事故防止）
 
-| DO                                                                           | DON'T                                                             |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Slides を別タブで開く URL は **`buildSlidesViewerUrl` 経由の viewer** を使う | `/embed` のまま「読み込み complete を待つ」だけに依存しない       |
-| 大きな PDF バイナリは **`storage.local` + キー返却**                         | runtime message のみで巨大 base64 をやり取りしない                |
-| デバッグログは **JSON 一行＋仮説 ID**                                        | 本番に不要な `console.log` だけで終わらせない（必要なら後で削除） |
-| ログ受け口は **`nc -l 7442` 等 POST を記録できるもの**                       | `python3 -m http.server 7442` だけを「取れる」と思わない          |
+| DO                                                                               | DON'T                                                             |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Slides を別タブで開く URL は **`buildSlidesViewerUrl` 経由の viewer** を使う     | `/embed` のまま「読み込み complete を待つ」だけに依存しない       |
+| 大きな PDF は **background 側で逐次組み立てて Blob download**                    | 全ページ JPEG を配列に貯めてから別形式へ二重保持しない            |
+| デバッグログは **JSON 一行＋仮説 ID**                                            | 本番に不要な `console.log` だけで終わらせない（必要なら後で削除） |
+| ログ受け口は **`nc -l 7442` や `7443`、または POST を 200 応答で記録できるもの** | `python3 -m http.server 7442` だけを「取れる」と思わない          |
 
 ---
 
@@ -299,10 +321,10 @@ stateDiagram-v2
 
 ### 13.1 構造化ログ（JSON）
 
-バックグラウンド・コンテンツ・（必要なら）`slides-export.js` で共通フォーマットを使う。
+バックグラウンド・コンテンツ・（必要なら）`slides-export.js` で共通フォーマットを使う。**`AGENT_LOG_ENABLED` を true にしたローカル検証時だけ有効化する。**
 
 ```js
-fetch('http://127.0.0.1:7442/ingest/<セッションID>', {
+fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({

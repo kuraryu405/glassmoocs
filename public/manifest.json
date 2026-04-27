@@ -15,7 +15,7 @@
     }
   },
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["background/pdf.js", "background.js"],
     "preferred_environment": ["service_worker", "document"],
     "service_worker": "background.js"
   },
@@ -28,11 +28,11 @@
     {
       "matches": ["https://moocs.iniad.org/*"],
       "css": ["styles.css"],
-      "js": ["content.js"]
+      "js": ["content/download-panel.js", "content.js"]
     },
     {
       "matches": ["https://docs.google.com/presentation/*"],
-      "js": ["slides-export.js"]
+      "js": ["slides-export/svg-export.js", "slides-export.js"]
     }
   ],
   "web_accessible_resources": [

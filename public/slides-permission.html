@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Slides キャプチャ権限</title>
+    <link rel="stylesheet" href="slides-permission.css" />
+  </head>
+  <body>
+    <main class="permission-shell">
+      <section class="permission-card">
+        <p class="permission-eyebrow">GlassMOOCs</p>
+        <h1>Slides キャプチャ権限</h1>
+        <p class="permission-copy">
+          高速エクスポートが失敗した場合のみ、表示タブキャプチャのフォールバックを使います。必要なときだけ許可してください。
+        </p>
+        <button id="grant-button" type="button" class="permission-button">
+          権限を許可する
+        </button>
+        <p id="status" class="permission-status">
+          Firefox の確認ダイアログで「許可」を選んでください。
+        </p>
+      </section>
+    </main>
+    <script src="slides-permission.js"></script>
+  </body>
+</html>

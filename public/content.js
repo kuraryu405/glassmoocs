@@ -23,6 +23,9 @@
     getDownloadState: 'glassmoocs:get-download-state',
     setDownloadState: 'glassmoocs:set-download-state',
     downloadAssets: 'glassmoocs:download-assets',
+    getSlidesCapturePermission: 'glassmoocs:get-slides-capture-permission',
+    openSlidesCapturePermissionWindow:
+      'glassmoocs:open-slides-capture-permission-window',
     getPageContext: 'glassmoocs:get-page-context',
     startCourseCollection: 'glassmoocs:start-course-collection',
     downloadCurrentPage: 'glassmoocs:download-current-page',
@@ -62,6 +65,13 @@
     'mp3',
   ]);
   const extensionApi = globalThis.browser || globalThis.chrome || null;
+  const AGENT_LOG_ENABLED = false;
+  // [H-CT-A] target page does not expose downloadable assets when the panel renders
+  // [H-CT-B] current-page download does not reach background queueing as expected
+  const AGENT_LOG_SESSION_ID = `glassmoocs-cs-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  const DEBUG_AUTO_DOWNLOAD_PARAM = 'glassmoocs_debug_auto_download';
 
   const TAB_TYPES = {
     attendanceTest: {
@@ -90,7 +100,6 @@
   let enhancementFrame = 0;
   let submitIntentAt = 0;
   let reloadTimer = 0;
-  let downloadRefreshTimer = 0;
 
   function getExtensionStorage() {
     if (globalThis.browser?.storage?.local) {
@@ -198,6 +207,27 @@
         reject(error);
       }
     });
+  }
+
+  function postAgentLog(location, message, data, hypothesisId) {
+    if (!AGENT_LOG_ENABLED) {
+      return;
+    }
+
+    fetch(`http://127.0.0.1:7443/ingest/${AGENT_LOG_SESSION_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: AGENT_LOG_SESSION_ID,
+        location,
+        message,
+        data,
+        hypothesisId,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
   }
 
   function isMacLike() {
@@ -957,10 +987,42 @@
     const seen = new Set();
 
     return items.filter((item) => {
-      if (!item?.url || seen.has(item.url)) return false;
-      seen.add(item.url);
+      const key = getAssetDedupeKey(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
+  }
+
+  function canonicalizeAssetUrl(rawUrl) {
+    const normalized = normalizeText(rawUrl);
+    if (!normalized) {
+      return '';
+    }
+
+    try {
+      const url = new URL(normalized);
+      url.hash = '';
+      url.searchParams.delete('glassmoocs_export');
+      url.searchParams.delete('glassmoocs_job');
+      url.searchParams.delete('glassmoocs_filename');
+      url.searchParams.sort();
+      url.pathname = url.pathname.replace(/\/+$/g, '') || '/';
+      return url.toString();
+    } catch {
+      return normalized;
+    }
+  }
+
+  function getAssetDedupeKey(item) {
+    const preferredUrl =
+      item?.kind === 'google_slides' ? item?.viewerUrl || item?.url : item?.url;
+    const normalizedUrl = canonicalizeAssetUrl(preferredUrl);
+    if (!normalizedUrl) {
+      return '';
+    }
+
+    return `${normalizeText(item?.kind, 'direct_file')}::${normalizedUrl}`;
   }
 
   function getUrlBasename(rawUrl) {
@@ -1338,6 +1400,7 @@
       completed: [],
       failed: [],
       lastError: '',
+      needsCapturePermission: false,
     };
   }
 
@@ -1391,6 +1454,7 @@
       completed: [],
       failed: [],
       lastError: normalizeText(lastError),
+      needsCapturePermission: false,
     };
   }
 
@@ -1407,6 +1471,35 @@
     }
   }
 
+  async function getSlidesCapturePermissionState() {
+    const response = await runtimeSendMessage({
+      type: MESSAGE_TYPES.getSlidesCapturePermission,
+    });
+    if (!response?.ok) {
+      throw new Error(
+        normalizeText(
+          response?.error,
+          'slides capture permission check failed',
+        ),
+      );
+    }
+
+    return !!response.granted;
+  }
+
+  async function openSlidesCapturePermissionWindow() {
+    const response = await runtimeSendMessage({
+      type: MESSAGE_TYPES.openSlidesCapturePermissionWindow,
+    });
+    if (!response?.ok) {
+      throw new Error(
+        normalizeText(
+          response?.error,
+          'slides capture permission window failed to open',
+        ),
+      );
+    }
+  }
   async function buildCurrentPageDownloadPayload() {
     const pageContext = getCurrentPageContext(document, window.location.href);
     if (!pageContext) {
@@ -1565,8 +1658,9 @@
         );
 
         pageAssets.forEach((entry) => {
-          if (seenUrls.has(entry.url)) return;
-          seenUrls.add(entry.url);
+          const dedupeKey = getAssetDedupeKey(entry);
+          if (!dedupeKey || seenUrls.has(dedupeKey)) return;
+          seenUrls.add(dedupeKey);
           assets.push({
             ...entry,
             courseName,
@@ -1618,191 +1712,105 @@
     return lines.join(' / ');
   }
 
-  function getDownloadPanelAnchor() {
-    return (
-      document.querySelector('.content-header') ||
-      document.querySelector('.content-wrapper') ||
-      document.body
-    );
+  function pageNeedsSlidesCapturePermission(state, granted) {
+    if (granted) return false;
+    return !!state?.needsCapturePermission;
   }
 
-  function mountDownloadPanel(panel, anchor) {
-    if (!anchor || !anchor.parentElement) {
-      document.body.prepend(panel);
-      return;
-    }
-
-    if (anchor.matches('.content-header')) {
-      anchor.insertAdjacentElement('afterend', panel);
-      return;
-    }
-
-    anchor.prepend(panel);
-  }
-
-  function scheduleDownloadPanelRefresh() {
-    if (downloadRefreshTimer) return;
-
-    downloadRefreshTimer = window.setTimeout(() => {
-      downloadRefreshTimer = 0;
-      refreshDownloadPanels();
-    }, 60);
-  }
-
-  async function refreshDownloadPanels() {
-    const panels = [...document.querySelectorAll('.glassmoocs-download-panel')];
-    if (!panels.length) return;
-
-    const pageContext = getCurrentPageContext(document, window.location.href);
-    const state = await getDownloadState();
-    const busy =
-      state.status === DOWNLOAD_STATUS.collecting ||
-      state.status === DOWNLOAD_STATUS.downloading ||
-      state.status === DOWNLOAD_STATUS.rendering ||
-      state.status === DOWNLOAD_STATUS.printing;
-
-    panels.forEach((panel) => {
-      const contextNode = panel.querySelector('.glassmoocs-download-context');
-      const statusNode = panel.querySelector('.glassmoocs-download-status');
-      const collectButton = panel.querySelector(
-        '[data-glassmoocs-download-action="course"]',
-      );
-      const pageButton = panel.querySelector(
-        '[data-glassmoocs-download-action="page"]',
-      );
-
-      const contextLines = [];
-      if (pageContext?.courseName)
-        contextLines.push(`科目: ${pageContext.courseName}`);
-      if (pageContext?.lectureGroup)
-        contextLines.push(`区分: ${pageContext.lectureGroup}`);
-      if (pageContext?.lectureName)
-        contextLines.push(`講義: ${pageContext.lectureName}`);
-      if (pageContext?.pageTitle)
-        contextLines.push(`ページ: ${pageContext.pageTitle}`);
-
-      if (contextNode) {
-        contextNode.textContent =
-          contextLines.join(' / ') || '科目・講義情報を取得できませんでした。';
-      }
-
-      if (statusNode) {
-        statusNode.textContent = formatDownloadStateText(state, pageContext);
-      }
-
-      if (collectButton instanceof HTMLButtonElement) {
-        collectButton.disabled = busy || !pageContext?.courseUrl;
-      }
-
-      if (pageButton instanceof HTMLButtonElement) {
-        pageButton.disabled =
-          busy ||
-          !pageContext?.assetCandidates ||
-          pageContext.assetCandidates.length === 0;
-      }
-    });
-  }
-
-  async function handleCourseCollectionRequest() {
-    const result = await collectCourseAssetsFromCurrentPage();
-    await requestBackgroundDownload({
-      courseName: result.courseName,
-      assets: result.assets,
-    });
-    return result;
-  }
-
-  async function handleCurrentPageDownloadRequest() {
-    const payload = await buildCurrentPageDownloadPayload();
-    if (!payload.assets.length) {
-      throw new Error(
-        'このページでダウンロード可能な資料が見つかりませんでした。',
-      );
-    }
-
-    await requestBackgroundDownload(payload);
-    return payload;
-  }
-
-  function setPanelBusy(panel, busy) {
-    panel.dataset.glassmoocsDownloadBusy = busy ? 'true' : 'false';
-    panel
-      .querySelectorAll('button')
-      .forEach((button) => (button.disabled = busy));
-  }
-
-  async function runPanelAction(panel, action) {
-    const statusNode = panel.querySelector('.glassmoocs-download-status');
-    setPanelBusy(panel, true);
-
-    try {
-      await action();
-    } catch (error) {
-      if (statusNode) {
-        statusNode.textContent = normalizeText(
-          error?.message,
-          '資料処理に失敗しました。',
-        );
-      }
-    } finally {
-      setPanelBusy(panel, false);
-      scheduleDownloadPanelRefresh();
-    }
-  }
-
-  function createDownloadPanel() {
-    const panel = document.createElement('section');
-    panel.className = 'glassmoocs-download-panel';
-    panel.dataset.glassmoocsDownloadPanel = 'true';
-    panel.innerHTML = `
-      <div class="glassmoocs-download-copy">
-        <p class="glassmoocs-download-eyebrow">GlassMOOCs Download</p>
-        <h2>授業資料を整理して保存</h2>
-        <p class="glassmoocs-download-context"></p>
-      </div>
-      <div class="glassmoocs-download-actions">
-        <button type="button" class="glassmoocs-download-button primary" data-glassmoocs-download-action="course">この科目を収集</button>
-        <button type="button" class="glassmoocs-download-button" data-glassmoocs-download-action="page">このページの資料を保存</button>
-      </div>
-      <p class="glassmoocs-download-status"></p>
-    `;
-
-    const collectButton = panel.querySelector(
-      '[data-glassmoocs-download-action="course"]',
-    );
-    const pageButton = panel.querySelector(
-      '[data-glassmoocs-download-action="page"]',
-    );
-
-    collectButton?.addEventListener('click', () => {
-      runPanelAction(panel, handleCourseCollectionRequest);
+  const downloadPanelComponent =
+    globalThis.__glassmoocsCreateDownloadPanelComponent({
+      DOWNLOAD_STATUS,
+      buildCurrentPageDownloadPayload,
+      collectCourseAssetsFromCurrentPage,
+      formatDownloadStateText,
+      getCurrentPageContext,
+      getDownloadState,
+      getSlidesCapturePermissionState,
+      normalizeText,
+      openSlidesCapturePermissionWindow,
+      pageNeedsSlidesCapturePermission,
+      postAgentLog,
+      requestBackgroundDownload,
     });
 
-    pageButton?.addEventListener('click', () => {
-      runPanelAction(panel, handleCurrentPageDownloadRequest);
-    });
-
-    return panel;
-  }
+  const {
+    handleCourseCollectionRequest,
+    handleCurrentPageDownloadRequest,
+    injectDownloadControls: injectDownloadControlsBase,
+    scheduleDownloadPanelRefresh,
+  } = downloadPanelComponent;
 
   function injectDownloadControls() {
     const pageContext = getCurrentPageContext(document, window.location.href);
-    let panel = document.querySelector('.glassmoocs-download-panel');
+    injectDownloadControlsBase();
+    if (pageContext) {
+      maybeAutoTriggerDebugDownload(pageContext);
+    }
+  }
 
-    if (!pageContext) {
-      panel?.remove();
+  function maybeAutoTriggerDebugDownload(pageContext) {
+    if (
+      !new URL(window.location.href).searchParams.has(DEBUG_AUTO_DOWNLOAD_PARAM)
+    ) {
       return;
     }
 
-    const anchor = getDownloadPanelAnchor();
-    if (!anchor) return;
-
-    if (!panel) {
-      panel = createDownloadPanel();
-      mountDownloadPanel(panel, anchor);
+    if (globalThis.__glassmoocsDebugAutoDownloadStarted) {
+      return;
     }
 
-    scheduleDownloadPanelRefresh();
+    if (!pageContext?.assetCandidates?.length) {
+      postAgentLog(
+        'content.js:maybeAutoTriggerDebugDownload',
+        'debug auto-download waiting for asset candidates',
+        {
+          href: window.location.href,
+          pageTitle: pageContext?.pageTitle || '',
+          assetCount: 0,
+        },
+        'H-CT-A',
+      );
+      return;
+    }
+
+    globalThis.__glassmoocsDebugAutoDownloadStarted = true;
+    postAgentLog(
+      'content.js:maybeAutoTriggerDebugDownload',
+      'triggering debug auto-download for current page',
+      {
+        href: window.location.href,
+        pageTitle: pageContext.pageTitle || '',
+        assetCount: pageContext.assetCandidates.length,
+      },
+      'H-CT-B',
+    );
+
+    handleCurrentPageDownloadRequest()
+      .then((payload) => {
+        postAgentLog(
+          'content.js:maybeAutoTriggerDebugDownload',
+          'debug auto-download request completed',
+          {
+            href: window.location.href,
+            assetCount: payload.assets.length,
+          },
+          'H-CT-B',
+        );
+      })
+      .catch((error) => {
+        postAgentLog(
+          'content.js:maybeAutoTriggerDebugDownload',
+          'debug auto-download request failed',
+          {
+            href: window.location.href,
+            error: normalizeText(error?.message, 'unknown error'),
+          },
+          'H-CT-B',
+        );
+      })
+      .finally(() => {
+        scheduleDownloadPanelRefresh();
+      });
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
@@ -1881,6 +1889,7 @@
 
     window.addEventListener('keydown', handleBackgroundShortcut, true);
     window.addEventListener('keydown', handleTabShortcut, true);
+    window.addEventListener('focus', scheduleDownloadPanelRefresh);
     document.addEventListener('click', handleSubmitIntent, true);
     window.addEventListener(SUBMIT_SUCCESS_EVENT, handleSubmitSuccess);
     window.addEventListener('load', scheduleEnhancements);

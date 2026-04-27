@@ -1,14 +1,27 @@
 (function () {
+  if (
+    typeof globalThis.importScripts === 'function' &&
+    !globalThis.__glassmoocsBackgroundPdfUtilsLoaded
+  ) {
+    globalThis.importScripts('background/pdf.js');
+    globalThis.__glassmoocsBackgroundPdfUtilsLoaded = true;
+  }
+
   const DOWNLOAD_STATE_STORAGE_KEY = 'glassmoocs_download_state';
   const MESSAGE_TYPES = {
     getState: 'glassmoocs:get-download-state',
     setState: 'glassmoocs:set-download-state',
     resetState: 'glassmoocs:reset-download-state',
     downloadAssets: 'glassmoocs:download-assets',
+    getSlidesCapturePermission: 'glassmoocs:get-slides-capture-permission',
+    openSlidesCapturePermissionWindow:
+      'glassmoocs:open-slides-capture-permission-window',
+    fetchImageDataUrl: 'glassmoocs:fetch-image-data-url',
     getSlidesSessionInfo: 'glassmoocs:get-slides-session-info',
     waitForSlideReady: 'glassmoocs:wait-for-slide-ready',
     goToFirstSlide: 'glassmoocs:go-to-first-slide',
     goToSlide: 'glassmoocs:go-to-slide',
+    serializeCurrentSlideSvg: 'glassmoocs:serialize-current-slide-svg',
   };
   const STATUS = {
     idle: 'idle',
@@ -24,9 +37,48 @@
   const CAPTURE_QUALITY = 92;
   const CAPTURE_INTERVAL_MS = 250;
   const CAPTURE_REACTIVATE_DELAY_MS = 500;
+  const MAX_PATH_SEGMENT_LENGTH = 120;
+  const AGENT_LOG_ENABLED = false;
+  const ERROR_CODES = {
+    canceled: 'canceled',
+    capturePermissionRequired: 'capture_permission_required',
+  };
+  const WINDOWS_RESERVED_NAMES = new Set([
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
+  ]);
   const api = globalThis.browser || globalThis.chrome;
+  // [H-SVG-A] SVG 直列化経路に入れていない、または途中失敗している
+  // [H-SVG-B] SVG 直列化後のラスタライズ/PDF 化が支配的に遅い
+  // [H-SVG-C] SVG 経路が失敗して capture フォールバックに落ちている
+  // [H-TAB-A] Slides タブ生成/読み込みが不安定で about:blank に留まる
+  // #region agent log
+  const AGENT_LOG_SESSION_ID = `glassmoocs-bg-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
   let queueNonce = 0;
+  let activeSlidesTabId = null;
 
   if (!api?.runtime?.onMessage) {
     return;
@@ -35,6 +87,26 @@
   function getRuntimeLastError() {
     return globalThis.chrome?.runtime?.lastError || null;
   }
+
+  function postAgentLog(location, message, data = {}, hypothesisId = '') {
+    if (!AGENT_LOG_ENABLED) {
+      return;
+    }
+
+    fetch(`http://127.0.0.1:7443/ingest/${AGENT_LOG_SESSION_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: AGENT_LOG_SESSION_ID,
+        location,
+        message,
+        data,
+        hypothesisId,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion agent log
 
   function storageGet(keys) {
     try {
@@ -164,6 +236,33 @@
           }
 
           resolve(tab);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function windowsCreate(createData) {
+    try {
+      const result = api.windows.create(createData);
+      if (result && typeof result.then === 'function') {
+        return result;
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        api.windows.create(createData, (windowInfo) => {
+          const error = getRuntimeLastError();
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve(windowInfo);
         });
       } catch (error) {
         reject(error);
@@ -348,6 +447,7 @@
       completed: [],
       failed: [],
       lastError: '',
+      needsCapturePermission: false,
     };
   }
 
@@ -359,7 +459,7 @@
 
   function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value, fallback);
-    const replaced = normalized
+    let replaced = normalized
       .split('')
       .map((char) => {
         if (char < ' ') return '_';
@@ -367,8 +467,36 @@
         return char;
       })
       .join('')
-      .replace(/\.+$/g, '')
+      .replace(/[\s.]+$/g, '')
+      .replace(/^[\s.]+/g, '')
       .trim();
+    if (!replaced) {
+      return fallback;
+    }
+
+    const extensionMatch = replaced.match(/(\.[a-z0-9]{1,16})$/i);
+    const extension = extensionMatch ? extensionMatch[1] : '';
+    const baseName = extension
+      ? replaced.slice(0, -extension.length)
+      : replaced;
+    const reservedCandidate = (baseName || replaced).toUpperCase();
+    if (WINDOWS_RESERVED_NAMES.has(reservedCandidate)) {
+      replaced = extension ? `${baseName}_${extension}` : `${replaced}_`;
+    }
+
+    if (replaced.length > MAX_PATH_SEGMENT_LENGTH) {
+      if (extension && extension.length < MAX_PATH_SEGMENT_LENGTH) {
+        const maxBaseLength = Math.max(
+          1,
+          MAX_PATH_SEGMENT_LENGTH - extension.length,
+        );
+        replaced = `${baseName.slice(0, maxBaseLength)}${extension}`;
+      } else {
+        replaced = replaced.slice(0, MAX_PATH_SEGMENT_LENGTH);
+      }
+      replaced = replaced.replace(/[\s.]+$/g, '').trim();
+    }
+
     return replaced || fallback;
   }
 
@@ -410,6 +538,7 @@
         : idle.completed,
       failed: Array.isArray(state.failed) ? state.failed : idle.failed,
       lastError: normalizeText(state.lastError),
+      needsCapturePermission: !!state.needsCapturePermission,
     };
   }
 
@@ -455,12 +584,19 @@
         interruptedItem.length > 0
           ? '前回のダウンロードジョブは拡張機能の再読み込みにより中断されました。'
           : '',
+      needsCapturePermission: false,
     });
   }
 
   async function loadState() {
     const result = await storageGet([DOWNLOAD_STATE_STORAGE_KEY]);
-    return recoverStaleState(result[DOWNLOAD_STATE_STORAGE_KEY]);
+    return normalizeState(result[DOWNLOAD_STATE_STORAGE_KEY]);
+  }
+
+  async function recoverStateOnStartup() {
+    const result = await storageGet([DOWNLOAD_STATE_STORAGE_KEY]);
+    const recovered = recoverStaleState(result[DOWNLOAD_STATE_STORAGE_KEY]);
+    return await saveState(recovered);
   }
 
   async function saveState(nextState) {
@@ -485,6 +621,34 @@
       pageTitle: entry.pageTitle,
       source: entry.source,
     };
+  }
+
+  function canonicalizeAssetUrl(rawUrl) {
+    const normalized = normalizeText(rawUrl);
+    if (!normalized) {
+      return '';
+    }
+
+    try {
+      const url = new URL(normalized);
+      url.hash = '';
+      url.searchParams.delete('glassmoocs_export');
+      url.searchParams.delete('glassmoocs_job');
+      url.searchParams.delete('glassmoocs_filename');
+      url.searchParams.sort();
+      url.pathname = url.pathname.replace(/\/+$/g, '') || '/';
+      return url.toString();
+    } catch {
+      return normalized;
+    }
+  }
+
+  function getEntryDedupKey(entry) {
+    const preferredUrl =
+      entry.kind === 'google_slides'
+        ? buildSlidesViewerUrl(entry) || entry.viewerUrl || entry.url
+        : entry.url;
+    return `${normalizeText(entry.kind, 'direct_file')}::${canonicalizeAssetUrl(preferredUrl)}`;
   }
 
   function buildSlidesViewerUrl(entry) {
@@ -539,6 +703,17 @@
     return `glassmoocs/${safeCourseName}/${safeLectureName}/${safeFileName}`;
   }
 
+  const {
+    blobToDataUrl,
+    canvasToJpegBytes,
+    createCanvas,
+    createPdfBuilder,
+    cropCapturedSlide,
+  } = globalThis.__glassmoocsCreateBackgroundPdfUtils({
+    CAPTURE_QUALITY,
+    normalizeText,
+  });
+
   async function closeTabQuietly(tabId) {
     if (typeof tabId !== 'number') {
       return;
@@ -551,7 +726,44 @@
     }
   }
 
-  async function processDirectDownload(courseName, entry) {
+  function createCancellationError() {
+    const error = new Error('ダウンロード処理はキャンセルされました。');
+    error.code = ERROR_CODES.canceled;
+    return error;
+  }
+
+  function isCancellationError(error) {
+    return normalizeText(error?.code) === ERROR_CODES.canceled;
+  }
+
+  function createCapturePermissionRequiredError() {
+    const error = new Error(
+      'Slides の高速エクスポートに失敗したため、表示タブキャプチャの許可が必要です。' +
+        'ページ内の「権限を許可する」または拡張ポップアップの「Slides キャプチャを許可」から許可してください。',
+    );
+    error.code = ERROR_CODES.capturePermissionRequired;
+    return error;
+  }
+
+  function assertNotCanceled(cancelToken) {
+    if (cancelToken?.isCanceled?.()) {
+      throw createCancellationError();
+    }
+  }
+
+  function createCancelToken(nonce) {
+    return {
+      isCanceled() {
+        return nonce !== queueNonce;
+      },
+      throwIfCanceled() {
+        assertNotCanceled(this);
+      },
+    };
+  }
+
+  async function processDirectDownload(courseName, entry, cancelToken) {
+    assertNotCanceled(cancelToken);
     const filename = buildDownloadFilename(courseName, entry);
     const downloadId = await downloadFile({
       url: entry.url,
@@ -559,15 +771,14 @@
       conflictAction: 'uniquify',
       saveAs: false,
     });
-    await waitForDownloadCompletion(downloadId);
+    await waitForDownloadCompletion(downloadId, cancelToken);
     return {
       downloadId,
       storedFilename: filename,
     };
   }
 
-  async function downloadPdfBytes(pdfBytes, filename) {
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  async function downloadPdfBlob(blob, filename, cancelToken) {
     const blobUrl = URL.createObjectURL(blob);
 
     try {
@@ -577,7 +788,7 @@
         conflictAction: 'uniquify',
         saveAs: false,
       });
-      await waitForDownloadCompletion(downloadId);
+      await waitForDownloadCompletion(downloadId, cancelToken);
       return {
         downloadId,
         storedFilename: normalizeText(filename, 'slides.pdf'),
@@ -592,9 +803,11 @@
     const intervalMs = Number.isFinite(options.intervalMs)
       ? options.intervalMs
       : 800;
+    const cancelToken = options.cancelToken || null;
     let lastError = null;
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      assertNotCanceled(cancelToken);
       if (attempt > 0) {
         await sleep(intervalMs);
       }
@@ -642,11 +855,12 @@
     });
   }
 
-  async function waitForTabLoad(tabId, targetUrl = '') {
+  async function waitForTabLoad(tabId, targetUrl = '', cancelToken) {
     const timeoutAt = Date.now() + 60000;
     let lastUrl = '';
 
     while (Date.now() < timeoutAt) {
+      assertNotCanceled(cancelToken);
       const tab = await tabsGet(tabId);
       const status = tab?.status || 'unknown';
       const currentUrl = tab?.url || '';
@@ -664,10 +878,11 @@
     );
   }
 
-  async function waitForDownloadCompletion(downloadId) {
+  async function waitForDownloadCompletion(downloadId, cancelToken) {
     const timeoutAt = Date.now() + 120000;
 
     while (Date.now() < timeoutAt) {
+      assertNotCanceled(cancelToken);
       const items = await downloadsSearch({ id: downloadId });
       const item = items[0];
 
@@ -689,248 +904,6 @@
     throw new Error(`download timeout: ${downloadId}`);
   }
 
-  function concatUint8Arrays(chunks) {
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-
-    chunks.forEach((chunk) => {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    });
-
-    return result;
-  }
-
-  async function dataUrlToBlob(dataUrl) {
-    const response = await fetch(dataUrl);
-    return await response.blob();
-  }
-
-  async function blobToUint8Array(blob) {
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
-  async function canvasToJpegBytes(canvas) {
-    if (typeof canvas.convertToBlob === 'function') {
-      return await blobToUint8Array(
-        await canvas.convertToBlob({
-          type: 'image/jpeg',
-          quality: CAPTURE_QUALITY / 100,
-        }),
-      );
-    }
-
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(
-        (value) => {
-          if (!value) {
-            reject(new Error('capture canvas export failed'));
-            return;
-          }
-
-          resolve(value);
-        },
-        'image/jpeg',
-        CAPTURE_QUALITY / 100,
-      );
-    });
-
-    return await blobToUint8Array(blob);
-  }
-
-  function createCanvas(width, height) {
-    if (typeof OffscreenCanvas !== 'undefined') {
-      return new OffscreenCanvas(width, height);
-    }
-
-    if (typeof document !== 'undefined') {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      return canvas;
-    }
-
-    throw new Error('Slides capture 用キャンバスを作成できませんでした。');
-  }
-
-  async function cropCapturedSlide(dataUrl, captureMetrics) {
-    const blob = await dataUrlToBlob(dataUrl);
-    const bitmap = await createImageBitmap(blob);
-
-    try {
-      const viewportWidth = Number(captureMetrics?.viewportWidth) || 0;
-      const viewportHeight = Number(captureMetrics?.viewportHeight) || 0;
-      const rect = captureMetrics?.rect || {};
-      if (!viewportWidth || !viewportHeight) {
-        throw new Error('Slides capture viewport 情報が不足しています。');
-      }
-
-      const scaleX = bitmap.width / viewportWidth;
-      const scaleY = bitmap.height / viewportHeight;
-      const sourceX = Math.max(
-        0,
-        Math.round((Number(rect.left) || 0) * scaleX),
-      );
-      const sourceY = Math.max(0, Math.round((Number(rect.top) || 0) * scaleY));
-      const sourceWidth = Math.max(
-        1,
-        Math.round((Number(rect.width) || 0) * scaleX),
-      );
-      const sourceHeight = Math.max(
-        1,
-        Math.round((Number(rect.height) || 0) * scaleY),
-      );
-      const clampedWidth = Math.min(sourceWidth, bitmap.width - sourceX);
-      const clampedHeight = Math.min(sourceHeight, bitmap.height - sourceY);
-
-      if (clampedWidth <= 0 || clampedHeight <= 0) {
-        throw new Error('Slides capture 範囲が無効です。');
-      }
-
-      const canvas = createCanvas(clampedWidth, clampedHeight);
-      const context = canvas.getContext('2d');
-      if (!context) {
-        throw new Error('Slides capture canvas context unavailable');
-      }
-
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, clampedWidth, clampedHeight);
-      context.drawImage(
-        bitmap,
-        sourceX,
-        sourceY,
-        clampedWidth,
-        clampedHeight,
-        0,
-        0,
-        clampedWidth,
-        clampedHeight,
-      );
-
-      return {
-        width: clampedWidth,
-        height: clampedHeight,
-        jpegBytes: await canvasToJpegBytes(canvas),
-      };
-    } finally {
-      if (typeof bitmap.close === 'function') {
-        bitmap.close();
-      }
-    }
-  }
-
-  function createPdfFromJpegs(pages) {
-    const encoder = new TextEncoder();
-    const pdfWidth = 841.89;
-    const pdfHeight = 595.28;
-    const objects = [];
-    const catalogId = 1;
-    const pagesId = 2;
-    let nextObjectId = 3;
-
-    pages.forEach((page, index) => {
-      const imageId = nextObjectId++;
-      const contentId = nextObjectId++;
-      const pageId = nextObjectId++;
-      const imageName = `Im${index + 1}`;
-      const scale = Math.min(pdfWidth / page.width, pdfHeight / page.height);
-      const drawWidth = page.width * scale;
-      const drawHeight = page.height * scale;
-      const offsetX = (pdfWidth - drawWidth) / 2;
-      const offsetY = (pdfHeight - drawHeight) / 2;
-      const contentStream = [
-        'q',
-        `${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} ${offsetX.toFixed(2)} ${offsetY.toFixed(2)} cm`,
-        `/${imageName} Do`,
-        'Q',
-        '',
-      ].join('\n');
-
-      objects.push({
-        id: imageId,
-        dict:
-          `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} ` +
-          `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpegBytes.length} >>`,
-        stream: page.jpegBytes,
-      });
-      objects.push({
-        id: contentId,
-        dict: `<< /Length ${encoder.encode(contentStream).length} >>`,
-        stream: encoder.encode(contentStream),
-      });
-      objects.push({
-        id: pageId,
-        body:
-          `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${pdfWidth} ${pdfHeight}] ` +
-          `/Resources << /XObject << /${imageName} ${imageId} 0 R >> >> ` +
-          `/Contents ${contentId} 0 R >>`,
-      });
-    });
-
-    const pageRefs = objects
-      .filter((object) => object.body && /\/Type \/Page\b/.test(object.body))
-      .map((object) => `${object.id} 0 R`)
-      .join(' ');
-
-    objects.unshift({
-      id: pagesId,
-      body: `<< /Type /Pages /Count ${pages.length} /Kids [${pageRefs}] >>`,
-    });
-    objects.unshift({
-      id: catalogId,
-      body: `<< /Type /Catalog /Pages ${pagesId} 0 R >>`,
-    });
-
-    const chunks = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')];
-    const offsets = [0];
-    let currentOffset = chunks[0].length;
-
-    objects
-      .sort((left, right) => left.id - right.id)
-      .forEach((object) => {
-        offsets[object.id] = currentOffset;
-        const header = encoder.encode(`${object.id} 0 obj\n`);
-        chunks.push(header);
-        currentOffset += header.length;
-
-        if (object.stream) {
-          const dict = encoder.encode(`${object.dict}\nstream\n`);
-          const footer = encoder.encode('\nendstream\nendobj\n');
-          chunks.push(dict, object.stream, footer);
-          currentOffset += dict.length + object.stream.length + footer.length;
-          return;
-        }
-
-        const body = encoder.encode(`${object.body}\nendobj\n`);
-        chunks.push(body);
-        currentOffset += body.length;
-      });
-
-    const xrefOffset = currentOffset;
-    const totalObjects = objects.length;
-    const xrefLines = ['xref', `0 ${totalObjects + 1}`, '0000000000 65535 f '];
-
-    for (let objectId = 1; objectId <= totalObjects; objectId += 1) {
-      xrefLines.push(
-        `${String(offsets[objectId] || 0).padStart(10, '0')} 00000 n `,
-      );
-    }
-
-    const trailer = [
-      ...xrefLines,
-      'trailer',
-      `<< /Size ${totalObjects + 1} /Root ${catalogId} 0 R >>`,
-      'startxref',
-      String(xrefOffset),
-      '%%EOF',
-      '',
-    ].join('\n');
-
-    chunks.push(encoder.encode(trailer));
-    return concatUint8Arrays(chunks);
-  }
-
   async function ensureCaptureTabActive(tabId, windowId, alreadyRecovered) {
     const activeTabs = await tabsQuery({ active: true, windowId });
     if (activeTabs[0]?.id === tabId) {
@@ -948,17 +921,24 @@
     return true;
   }
 
-  async function waitForCaptureTurn(lastCaptureAt) {
+  async function waitForCaptureTurn(lastCaptureAt, cancelToken) {
+    assertNotCanceled(cancelToken);
     const waitMs = CAPTURE_INTERVAL_MS - (Date.now() - lastCaptureAt);
     if (waitMs > 0) {
       await sleep(waitMs);
     }
+    assertNotCanceled(cancelToken);
   }
 
-  async function requestSlidesSessionInfo(tabId) {
-    const response = await sendTabMessageWithRetry(tabId, {
-      type: MESSAGE_TYPES.getSlidesSessionInfo,
-    });
+  async function requestSlidesSessionInfo(tabId, cancelToken) {
+    assertNotCanceled(cancelToken);
+    const response = await sendTabMessageWithRetry(
+      tabId,
+      {
+        type: MESSAGE_TYPES.getSlidesSessionInfo,
+      },
+      { cancelToken },
+    );
     if (!response?.ok) {
       throw new Error(
         normalizeText(
@@ -971,10 +951,15 @@
     return response;
   }
 
-  async function requestGoToFirstSlide(tabId) {
-    const response = await sendTabMessageWithRetry(tabId, {
-      type: MESSAGE_TYPES.goToFirstSlide,
-    });
+  async function requestGoToFirstSlide(tabId, cancelToken) {
+    assertNotCanceled(cancelToken);
+    const response = await sendTabMessageWithRetry(
+      tabId,
+      {
+        type: MESSAGE_TYPES.goToFirstSlide,
+      },
+      { cancelToken },
+    );
     if (!response?.ok) {
       throw new Error(
         normalizeText(
@@ -985,11 +970,16 @@
     }
   }
 
-  async function requestGoToSlide(tabId, page) {
-    const response = await sendTabMessageWithRetry(tabId, {
-      type: MESSAGE_TYPES.goToSlide,
-      page,
-    });
+  async function requestGoToSlide(tabId, page, cancelToken) {
+    assertNotCanceled(cancelToken);
+    const response = await sendTabMessageWithRetry(
+      tabId,
+      {
+        type: MESSAGE_TYPES.goToSlide,
+        page,
+      },
+      { cancelToken },
+    );
     if (!response?.ok) {
       throw new Error(
         normalizeText(
@@ -1000,7 +990,13 @@
     }
   }
 
-  async function requestWaitForSlideReady(tabId, page, previousSnapshot) {
+  async function requestWaitForSlideReady(
+    tabId,
+    page,
+    previousSnapshot,
+    cancelToken,
+  ) {
+    assertNotCanceled(cancelToken);
     const response = await sendTabMessageWithRetry(
       tabId,
       {
@@ -1008,7 +1004,7 @@
         page,
         previousSnapshot,
       },
-      { attempts: 4, intervalMs: 300 },
+      { attempts: 4, intervalMs: 300, cancelToken },
     );
     if (!response?.ok) {
       throw new Error(
@@ -1022,18 +1018,375 @@
     return response;
   }
 
-  async function processSlidesDownload(courseName, entry, state) {
+  async function requestSerializeCurrentSlideSvg(tabId, page, cancelToken) {
+    const startedAt = Date.now();
+    assertNotCanceled(cancelToken);
+    postAgentLog(
+      'background.js:requestSerializeCurrentSlideSvg',
+      'serializeCurrentSlideSvg request start',
+      { tabId, page },
+      'H-SVG-A',
+    );
+    const response = await sendTabMessageWithRetry(
+      tabId,
+      {
+        type: MESSAGE_TYPES.serializeCurrentSlideSvg,
+        page,
+      },
+      { attempts: 4, intervalMs: 300, cancelToken },
+    );
+    if (!response?.ok || !normalizeText(response.svgText)) {
+      postAgentLog(
+        'background.js:requestSerializeCurrentSlideSvg',
+        'serializeCurrentSlideSvg request failed',
+        {
+          tabId,
+          page,
+          error: normalizeText(response?.error),
+        },
+        'H-SVG-A',
+      );
+      throw new Error(
+        normalizeText(
+          response?.error,
+          `Slides の ${page} ページ SVG 取得に失敗しました。`,
+        ),
+      );
+    }
+
+    postAgentLog(
+      'background.js:requestSerializeCurrentSlideSvg',
+      'serializeCurrentSlideSvg request done',
+      {
+        tabId,
+        page,
+        durationMs: Date.now() - startedAt,
+        svgLength: response.svgText.length,
+        renderWidth: response.renderWidth,
+        renderHeight: response.renderHeight,
+      },
+      'H-SVG-A',
+    );
+    return response;
+  }
+
+  async function renderSerializedSlidePage(page) {
+    const startedAt = Date.now();
+    const svgText = normalizeText(page?.svgText);
+    if (!svgText) {
+      throw new Error('serialized slide svg is empty');
+    }
+
+    const requestedWidth = Math.max(
+      1,
+      Math.round(Number(page?.renderWidth) || Number(page?.viewBoxWidth) || 0),
+    );
+    const requestedHeight = Math.max(
+      1,
+      Math.round(
+        Number(page?.renderHeight) || Number(page?.viewBoxHeight) || 0,
+      ),
+    );
+    const targetWidth = Math.max(
+      1280,
+      requestedWidth ? requestedWidth * 2 : 0,
+      Number(page?.viewBoxWidth)
+        ? Math.round(Number(page.viewBoxWidth) * 2)
+        : 0,
+    );
+    const targetHeight = Math.max(
+      720,
+      requestedHeight ? requestedHeight * 2 : 0,
+      Number(page?.viewBoxHeight)
+        ? Math.round(Number(page.viewBoxHeight) * 2)
+        : 0,
+    );
+
+    const blob = new Blob([svgText], {
+      type: 'image/svg+xml;charset=utf-8',
+    });
+    const bitmap = await createImageBitmap(blob);
+
+    try {
+      const canvas = createCanvas(targetWidth, targetHeight);
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('svg render canvas context unavailable');
+      }
+
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, targetWidth, targetHeight);
+      context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+
+      return {
+        width: targetWidth,
+        height: targetHeight,
+        jpegBytes: await canvasToJpegBytes(canvas),
+      };
+    } finally {
+      postAgentLog(
+        'background.js:renderSerializedSlidePage',
+        'serialized slide rasterized',
+        {
+          durationMs: Date.now() - startedAt,
+          targetWidth,
+          targetHeight,
+          svgLength: svgText.length,
+        },
+        'H-SVG-B',
+      );
+      if (typeof bitmap.close === 'function') {
+        bitmap.close();
+      }
+    }
+  }
+
+  async function fetchImageDataUrl(url) {
+    const response = await fetch(url, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(`image fetch failed: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const contentType = normalizeText(blob.type);
+    if (!contentType.startsWith('image/')) {
+      throw new Error(`image fetch returned non-image content: ${contentType}`);
+    }
+
+    return await blobToDataUrl(blob);
+  }
+
+  async function processSlidesDownloadBySvg(
+    courseName,
+    entry,
+    state,
+    tabId,
+    cancelToken,
+  ) {
+    const filename = buildDownloadFilename(courseName, entry);
+    const startedAt = Date.now();
+    postAgentLog(
+      'background.js:processSlidesDownloadBySvg',
+      'svg export path start',
+      {
+        tabId,
+        courseName,
+        filename,
+        viewerUrl: state.viewerUrl,
+      },
+      'H-SVG-A',
+    );
+
+    assertNotCanceled(cancelToken);
+    await saveState({
+      ...state,
+      status: STATUS.rendering,
+      stage: 'prepare-slide-svg-export',
+    });
+
+    const session = await requestSlidesSessionInfo(tabId, cancelToken);
+    if (!Number.isFinite(session.totalPages) || session.totalPages <= 0) {
+      postAgentLog(
+        'background.js:processSlidesDownloadBySvg',
+        'invalid slide session',
+        {
+          tabId,
+          totalPages: session?.totalPages,
+          currentPage: session?.currentPage,
+        },
+        'H-SVG-A',
+      );
+      throw new Error('Slides の総ページ数を取得できませんでした。');
+    }
+    postAgentLog(
+      'background.js:processSlidesDownloadBySvg',
+      'slide session ready',
+      {
+        tabId,
+        totalPages: session.totalPages,
+        currentPage: session.currentPage,
+      },
+      'H-SVG-A',
+    );
+
+    await requestGoToFirstSlide(tabId, cancelToken);
+    let previousSnapshot = '';
+    const pdfBuilder = createPdfBuilder();
+
+    for (let page = 1; page <= session.totalPages; page += 1) {
+      assertNotCanceled(cancelToken);
+      if (page > 1) {
+        await requestGoToSlide(tabId, page, cancelToken);
+      }
+
+      const ready = await requestWaitForSlideReady(
+        tabId,
+        page,
+        previousSnapshot,
+        cancelToken,
+      );
+      previousSnapshot = normalizeText(ready.snapshot);
+
+      await saveState({
+        ...state,
+        status: STATUS.rendering,
+        stage: `serialize-slide-${page}/${session.totalPages}`,
+      });
+
+      const serializedPage = await requestSerializeCurrentSlideSvg(
+        tabId,
+        page,
+        cancelToken,
+      );
+      pdfBuilder.addJpegPage(await renderSerializedSlidePage(serializedPage));
+    }
+
+    assertNotCanceled(cancelToken);
+    await saveState({
+      ...state,
+      status: STATUS.rendering,
+      stage: 'build-pdf',
+    });
+
+    const pdfBlob = pdfBuilder.finalize();
+    postAgentLog(
+      'background.js:processSlidesDownloadBySvg',
+      'svg export path done',
+      {
+        tabId,
+        totalPages: pdfBuilder.getPageCount(),
+        pdfBytes: pdfBlob.size,
+        durationMs: Date.now() - startedAt,
+      },
+      'H-SVG-B',
+    );
+    return await downloadPdfBlob(pdfBlob, filename, cancelToken);
+  }
+
+  async function processSlidesDownloadByCapture(
+    courseName,
+    entry,
+    state,
+    tabId,
+    windowId,
+    cancelToken,
+  ) {
+    const startedAt = Date.now();
+    postAgentLog(
+      'background.js:processSlidesDownloadByCapture',
+      'capture fallback path start',
+      {
+        tabId,
+        windowId,
+        courseName,
+        viewerUrl: state.viewerUrl,
+      },
+      'H-SVG-C',
+    );
+    assertNotCanceled(cancelToken);
     const hasPermission = await permissionsContains({
       origins: [CAPTURE_PERMISSION_ORIGIN],
     });
     if (!hasPermission) {
-      throw new Error(
-        'Slides を画像キャプチャで保存するには表示タブのキャプチャ許可が必要です。' +
-          'ポップアップの「Slides キャプチャを許可」ボタンをクリックしてください。',
-      );
+      throw createCapturePermissionRequiredError();
     }
 
+    await saveState({
+      ...state,
+      status: STATUS.rendering,
+      stage: 'prepare-slide-capture',
+    });
+
+    const session = await requestSlidesSessionInfo(tabId, cancelToken);
+    if (!Number.isFinite(session.totalPages) || session.totalPages <= 0) {
+      throw new Error('Slides の総ページ数を取得できませんでした。');
+    }
+
+    const filename = buildDownloadFilename(courseName, entry);
+    await requestGoToFirstSlide(tabId, cancelToken);
+    let previousSnapshot = '';
+    let lastCaptureAt = 0;
+    let hasRecoveredActivation = false;
+    const pdfBuilder = createPdfBuilder();
+
+    for (let page = 1; page <= session.totalPages; page += 1) {
+      assertNotCanceled(cancelToken);
+      if (page > 1) {
+        await requestGoToSlide(tabId, page, cancelToken);
+      }
+
+      const reactivated = await ensureCaptureTabActive(
+        tabId,
+        windowId,
+        hasRecoveredActivation,
+      );
+      if (reactivated) {
+        hasRecoveredActivation = true;
+      }
+
+      const ready = await requestWaitForSlideReady(
+        tabId,
+        page,
+        reactivated ? '' : previousSnapshot,
+        cancelToken,
+      );
+
+      await saveState({
+        ...state,
+        status: STATUS.rendering,
+        stage: `capture-slide-${page}/${session.totalPages}`,
+      });
+
+      await waitForCaptureTurn(lastCaptureAt, cancelToken);
+      const capturedImage = await captureVisibleTab(windowId, {
+        format: 'jpeg',
+        quality: CAPTURE_QUALITY,
+      });
+      lastCaptureAt = Date.now();
+      pdfBuilder.addJpegPage(
+        await cropCapturedSlide(capturedImage, ready.captureMetrics),
+      );
+      previousSnapshot = normalizeText(ready.snapshot);
+    }
+
+    assertNotCanceled(cancelToken);
+    await saveState({
+      ...state,
+      status: STATUS.rendering,
+      stage: 'build-pdf',
+    });
+
+    const pdfBlob = pdfBuilder.finalize();
+    postAgentLog(
+      'background.js:processSlidesDownloadByCapture',
+      'capture fallback path done',
+      {
+        tabId,
+        totalPages: pdfBuilder.getPageCount(),
+        pdfBytes: pdfBlob.size,
+        durationMs: Date.now() - startedAt,
+      },
+      'H-SVG-C',
+    );
+    return await downloadPdfBlob(pdfBlob, filename, cancelToken);
+  }
+
+  async function processSlidesDownload(courseName, entry, state, cancelToken) {
     const viewerUrl = buildSlidesViewerUrl(entry);
+    postAgentLog(
+      'background.js:processSlidesDownload',
+      'slides download entry',
+      {
+        courseName,
+        entryId: entry.id,
+        filename: entry.filename,
+        sourceUrl: entry.sourceUrl,
+        viewerUrl,
+      },
+      'H-SVG-A',
+    );
     if (!viewerUrl) {
       throw new Error('Google Slides の URL を組み立てられませんでした。');
     }
@@ -1045,103 +1398,101 @@
       stage: 'open-slides-viewer',
     });
 
-    const filename = buildDownloadFilename(courseName, entry);
     let tabId = -1;
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (tabId !== -1) {
-        await closeTabQuietly(tabId);
-        tabId = -1;
-      }
-      if (attempt > 0) {
-        await sleep(2000);
-      }
+    try {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        assertNotCanceled(cancelToken);
+        if (tabId !== -1) {
+          await closeTabQuietly(tabId);
+          tabId = -1;
+        }
+        if (attempt > 0) {
+          await sleep(2000);
+        }
 
-      const slidesTab = await tabsCreate({ url: viewerUrl, active: true });
-      tabId = slidesTab.id;
-      const loadedTab = await waitForTabLoad(tabId, viewerUrl);
-      if (loadedTab?.url && loadedTab.url !== 'about:blank') {
-        const windowId = loadedTab.windowId;
-        try {
-          await saveState({
-            ...state,
-            status: STATUS.rendering,
+        const slidesTab = await tabsCreate({ url: viewerUrl, active: true });
+        tabId = slidesTab.id;
+        activeSlidesTabId = tabId;
+        postAgentLog(
+          'background.js:processSlidesDownload',
+          'slides tab created',
+          {
+            attempt: attempt + 1,
+            tabId,
             viewerUrl,
-            stage: 'prepare-slide-capture',
-          });
-
-          const session = await requestSlidesSessionInfo(tabId);
-          if (!Number.isFinite(session.totalPages) || session.totalPages <= 0) {
-            throw new Error('Slides の総ページ数を取得できませんでした。');
-          }
-
-          await requestGoToFirstSlide(tabId);
-          let previousSnapshot = '';
-          let lastCaptureAt = 0;
-          let hasRecoveredActivation = false;
-          const capturedPages = [];
-
-          for (let page = 1; page <= session.totalPages; page += 1) {
-            if (page > 1) {
-              await requestGoToSlide(tabId, page);
-            }
-
-            let ready = await requestWaitForSlideReady(
+            createdUrl: normalizeText(slidesTab?.url),
+          },
+          'H-TAB-A',
+        );
+        const loadedTab = await waitForTabLoad(tabId, viewerUrl, cancelToken);
+        postAgentLog(
+          'background.js:processSlidesDownload',
+          'slides tab loaded',
+          {
+            attempt: attempt + 1,
+            tabId,
+            loadedUrl: normalizeText(loadedTab?.url),
+            status: normalizeText(loadedTab?.status),
+          },
+          'H-TAB-A',
+        );
+        if (loadedTab?.url && loadedTab.url !== 'about:blank') {
+          const windowId = loadedTab.windowId;
+          try {
+            return await processSlidesDownloadBySvg(
+              courseName,
+              entry,
+              {
+                ...state,
+                viewerUrl,
+              },
               tabId,
-              page,
-              previousSnapshot,
+              cancelToken,
             );
-
-            await saveState({
-              ...state,
-              status: STATUS.rendering,
-              viewerUrl,
-              stage: `capture-slide-${page}/${session.totalPages}`,
-            });
-
-            const reactivated = await ensureCaptureTabActive(
+          } catch (svgError) {
+            assertNotCanceled(cancelToken);
+            postAgentLog(
+              'background.js:processSlidesDownload',
+              'svg export failed, falling back to capture',
+              {
+                tabId,
+                windowId,
+                viewerUrl,
+                error: normalizeText(svgError?.message, 'svg export failed'),
+              },
+              'H-SVG-C',
+            );
+            return await processSlidesDownloadByCapture(
+              courseName,
+              entry,
+              {
+                ...state,
+                viewerUrl,
+              },
               tabId,
               windowId,
-              hasRecoveredActivation,
+              cancelToken,
             );
-            if (reactivated) {
-              hasRecoveredActivation = true;
-              ready = await requestWaitForSlideReady(tabId, page, '');
-            }
-
-            await waitForCaptureTurn(lastCaptureAt);
-            const capturedImage = await captureVisibleTab(windowId, {
-              format: 'jpeg',
-              quality: CAPTURE_QUALITY,
-            });
-            lastCaptureAt = Date.now();
-            capturedPages.push(
-              await cropCapturedSlide(capturedImage, ready.captureMetrics),
-            );
-            previousSnapshot = normalizeText(ready.snapshot);
           }
-
-          await saveState({
-            ...state,
-            status: STATUS.rendering,
-            viewerUrl,
-            stage: 'build-pdf',
-          });
-
-          const pdfBytes = createPdfFromJpegs(capturedPages);
-          return await downloadPdfBytes(pdfBytes, filename);
-        } finally {
-          await closeTabQuietly(tabId);
         }
       }
-    }
 
-    if (tabId !== -1) {
-      await closeTabQuietly(tabId);
+      throw new Error(
+        'Google スライドのタブを開けませんでした。しばらく待ってから再試行してください。',
+      );
+    } finally {
+      if (tabId !== -1) {
+        postAgentLog(
+          'background.js:processSlidesDownload',
+          'closing slides tab',
+          { tabId, reason: 'process complete' },
+          'H-TAB-A',
+        );
+        await closeTabQuietly(tabId);
+      }
+      activeSlidesTabId = null;
     }
-    throw new Error(
-      'Google スライドのタブを開けませんでした。しばらく待ってから再試行してください。',
-    );
   }
 
   async function queueDownloads(payload) {
@@ -1152,7 +1503,7 @@
 
     const seenUrls = new Set();
     const entries = rawEntries.filter((entry) => {
-      const key = normalizeText(entry.viewerUrl || entry.url);
+      const key = getEntryDedupKey(entry);
       if (seenUrls.has(key)) return false;
       seenUrls.add(key);
       return true;
@@ -1176,6 +1527,7 @@
       completed: [],
       failed: [],
       lastError: '',
+      needsCapturePermission: false,
     });
 
     if (!entries.length) {
@@ -1193,14 +1545,16 @@
         completed: [],
         failed: [],
         lastError: 'ダウンロード対象の資料が見つかりませんでした。',
+        needsCapturePermission: false,
       });
       return;
     }
 
     let state = await loadState();
+    const cancelToken = createCancelToken(currentNonce);
 
     for (const entry of entries) {
-      if (currentNonce !== queueNonce) {
+      if (cancelToken.isCanceled()) {
         return;
       }
 
@@ -1219,14 +1573,15 @@
             ? 'open-slides-viewer'
             : 'download-direct-file',
         lastError: '',
+        needsCapturePermission: false,
       });
       await saveState(state);
 
       try {
         const result =
           entry.kind === 'google_slides'
-            ? await processSlidesDownload(courseName, entry, state)
-            : await processDirectDownload(courseName, entry);
+            ? await processSlidesDownload(courseName, entry, state, cancelToken)
+            : await processDirectDownload(courseName, entry, cancelToken);
 
         state = normalizeState({
           ...state,
@@ -1241,8 +1596,13 @@
           ],
           stage: '',
           lastError: '',
+          needsCapturePermission: false,
         });
       } catch (error) {
+        if (isCancellationError(error)) {
+          return;
+        }
+
         state = normalizeState({
           ...state,
           pending: state.pending.filter((item) => item.id !== entry.id),
@@ -1251,11 +1611,15 @@
             {
               ...summarizeEntry(entry),
               url: entry.url,
+              errorCode: normalizeText(error?.code),
               error: normalizeText(error?.message, 'download failed'),
             },
           ],
           stage: '',
           lastError: normalizeText(error?.message, 'download failed'),
+          needsCapturePermission:
+            normalizeText(error?.code) ===
+            ERROR_CODES.capturePermissionRequired,
         });
       }
 
@@ -1278,7 +1642,28 @@
       sourceUrl: '',
       viewerUrl: '',
       stage: '',
+      needsCapturePermission: state.needsCapturePermission,
     });
+  }
+
+  async function openSlidesCapturePermissionWindow() {
+    const permissionUrl = api.runtime.getURL('slides-permission.html');
+    try {
+      return await windowsCreate({
+        url: permissionUrl,
+        type: 'popup',
+        width: 480,
+        height: 560,
+        focused: true,
+      });
+    } catch {
+      return await windowsCreate({
+        url: permissionUrl,
+        width: 480,
+        height: 560,
+        focused: true,
+      });
+    }
   }
 
   api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -1310,6 +1695,9 @@
 
     if (type === MESSAGE_TYPES.resetState) {
       queueNonce += 1;
+      const closingTabId = activeSlidesTabId;
+      activeSlidesTabId = null;
+      closeTabQuietly(closingTabId).catch(() => {});
       saveState(createIdleState())
         .then((state) => sendResponse({ ok: true, state }))
         .catch((error) =>
@@ -1324,6 +1712,9 @@
     if (type === MESSAGE_TYPES.downloadAssets) {
       sendResponse({ ok: true });
       queueDownloads(message?.payload).catch((error) => {
+        if (isCancellationError(error)) {
+          return;
+        }
         saveState({
           status: STATUS.failed,
           courseName: normalizeText(message?.payload?.courseName),
@@ -1338,24 +1729,68 @@
           completed: [],
           failed: [],
           lastError: normalizeText(error?.message, 'download queue failed'),
+          needsCapturePermission:
+            normalizeText(error?.code) ===
+            ERROR_CODES.capturePermissionRequired,
         }).catch(() => {});
       });
       return false;
     }
 
+    if (type === MESSAGE_TYPES.getSlidesCapturePermission) {
+      permissionsContains({
+        origins: [CAPTURE_PERMISSION_ORIGIN],
+      })
+        .then((granted) => sendResponse({ ok: true, granted: !!granted }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            granted: false,
+            error: normalizeText(
+              error?.message,
+              'failed to check slides capture permission',
+            ),
+          }),
+        );
+      return true;
+    }
+
+    if (type === MESSAGE_TYPES.openSlidesCapturePermissionWindow) {
+      openSlidesCapturePermissionWindow()
+        .then((windowInfo) =>
+          sendResponse({
+            ok: true,
+            windowId: Number.isFinite(windowInfo?.id) ? windowInfo.id : null,
+          }),
+        )
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: normalizeText(
+              error?.message,
+              'failed to open slides capture permission window',
+            ),
+          }),
+        );
+      return true;
+    }
+
+    if (type === MESSAGE_TYPES.fetchImageDataUrl) {
+      fetchImageDataUrl(normalizeText(message?.url))
+        .then((dataUrl) => sendResponse({ ok: true, dataUrl }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: normalizeText(error?.message, 'failed to fetch image data'),
+          }),
+        );
+      return true;
+    }
+
     return false;
   });
 
-  loadState().catch(() => {
+  recoverStateOnStartup().catch(() => {
     saveState(createIdleState()).catch(() => {});
   });
-
-  storageGet([DOWNLOAD_STATE_STORAGE_KEY])
-    .then((result) => {
-      const recovered = recoverStaleState(result[DOWNLOAD_STATE_STORAGE_KEY]);
-      return saveState(recovered);
-    })
-    .catch(() => {
-      saveState(createIdleState()).catch(() => {});
-    });
 })();

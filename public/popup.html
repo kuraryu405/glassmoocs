@@ -46,9 +46,13 @@
       >
         <p class="popup-section-title">Slides キャプチャ</p>
         <p class="popup-context">
-          Slides を画像 PDF
-          として保存するには、表示中タブのキャプチャ許可が必要です。
+          高速エクスポートが失敗した場合のみ、表示中タブのキャプチャ許可を使って保存します。
         </p>
+        <p
+          id="slides-permission-status"
+          class="popup-context"
+          style="display: none"
+        ></p>
         <div class="popup-actions">
           <button
             id="grant-slides-permission-button"
@@ -79,6 +83,7 @@
       </footer>
     </main>
 
+    <script src="popup/slides-permission-card.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
