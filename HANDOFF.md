@@ -2,9 +2,8 @@
 
 ## これは何か
 
-`glassmoocs` の「MOOCs 授業資料を科目・講義ごとに整理してダウンロードする機能」について、
-**次の担当者がすぐ再開するための最新引き継ぎ**。
-2026-04-27 時点での Firefox 実機デバッグ結果を反映済み。
+`glassmoocs` の Google Slides 保存まわりについて、次セッションの担当者がそのまま再開するための最新引き継ぎ。
+2026-04-30 時点の Firefox 実機確認を反映している。
 
 ---
 
@@ -16,322 +15,137 @@ main
 
 ---
 
-## 作業の目的
+## 現状の結論
 
-MOOCs の授業資料を以下の構造で `Downloads/glassmoocs/` に保存する。
+- 直近の Firefox 実機では、Google Slides 保存は **capture fallback ではなく SVG 経路で完走**している
+- 以前遅かった主因は [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js) の `renderSerializedSlidePage()` 内で、Firefox が `createImageBitmap(svg blob)` に毎ページ `InvalidStateError` を返し、**毎ページ HTML image fallback に落ちていたこと**
+- その点は修正済みで、Firefox では最初から `Image` 経由でラスタライズする分岐を入れている
+- 修正後 session では `createImageBitmap failed` は 0 件、`falling back to html image rasterization` も 0 件、`status: done` を確認済み
+
+つまり、**いま詰めるべき主戦場は `createImageBitmap` ではない**。
+次は SVG 経路の中でどこに時間が掛かっているかを定量化して詰める段階。
+
+---
+
+## 今回までに入っている修正
+
+### [`public/slides-export.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/slides-export.js)
+
+- `getSlideSnapshot()` に `getCurrentPage()` を入れた
+- 別ページなのに previous snapshot と同一扱いされる問題を軽減した
+
+### [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js)
+
+- `7443` への structured log 送信に失敗したときの fallback buffer として `glassmoocs_debug_log_buffer` を追加
+- プレーンテキスト mirror として `glassmoocs_debug_log_text` を追加
+- `isFirefoxLike()` を追加
+- `renderSerializedSlidePage()` で Firefox は `createImageBitmap` を通さず、最初から `Image` 経由ラスタライズに変更
+
+---
+
+## structured log の扱い
+
+### 7443 の扱い
+
+- Firefox 側では `7443` 送信が `load_success:false` のままになるケースが続いている
+- そのため [`artifacts/slides-debug-7443.log`](/Users/tsutsumin/Documents/GitHub/glassmoocs/artifacts/slides-debug-7443.log) は **現時点では信頼しない**
+- 代わりに extension storage の fallback buffer を使う
+
+### 現在見るべき storage key
+
+- `glassmoocs_debug_log_buffer`
+- `glassmoocs_debug_log_text`
+- `glassmoocs_download_state`
+
+### Firefox profile 情報
+
+現 UUID:
 
 ```text
-glassmoocs/
-  2026/
-    科目名/
-      講義グループ - 講義名/
-        01 - 資料.pdf
-        02 - 資料.pdf
+iniad-glassmorphism@local -> e57cf4da-ba16-4b74-8ab5-316947114258
 ```
 
-- 年度ごとに分かれる
-- 科目ごとに分かれる
-- 講義グループ + 講義名ごとに分かれる
-- 実体 PDF が保存される
-- MOOCs ホームではダウンロード UI を出さない
-
----
-
-## 現在の実装状態
-
-### すでに入っているもの
-
-| 項目                                                     | 状態 |
-| -------------------------------------------------------- | ---- |
-| MOOCs ページ内ダウンロード UI                            | ✅   |
-| popup からの「この科目を収集 / このページの資料を保存」  | ✅   |
-| 保存先 `year/course/lectureGroup - lectureName/filename` | ✅   |
-| Slides を `google_slides` として queue に載せる          | ✅   |
-| Slides viewer を別タブで開く                             | ✅   |
-| SVG 直列化 → rasterize → PDF 生成の高速経路              | ✅   |
-| `captureVisibleTab` ベースのフォールバック経路           | ✅   |
-| ページ内から開ける Slides キャプチャ権限ウィンドウ       | ✅   |
-| popup 側の Slides キャプチャ権限 UI                      | ✅   |
-| 構造化ログの仕込み                                       | ✅   |
-
-### いま壊れている / 未解決のもの
-
-| 症状                                                                       | 状況                                                                |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Slides が高速経路で安定完走しない                                          | ❌                                                                  |
-| 途中で capture fallback に落ちる                                           | ❌ ほぼ確実                                                         |
-| 2 ページ目以降、特に最後のページで `描画待機がタイムアウトしました` が出る | ❌                                                                  |
-| 一時アドオンの `Reload` を Computer Use から安定して踏めない               | ❌                                                                  |
-| 構造化ログの本番回収                                                       | ❌ 古い一時アドオンが走っている可能性が高く、まだ十分に取れていない |
-
----
-
-## 直近で確認した実機症状
-
-Firefox 上で popup から保存を実行したとき、以下のエラーを確認した。
-
-### 症状 A
+storage path:
 
 ```text
-1 ページのキャプチャ範囲が取得できませんでした。
+~/Library/Application Support/Firefox/Profiles/ksdnla8n.default-release/storage/default/moz-extension+++e57cf4da-ba16-4b74-8ab5-316947114258^userContextId=4294967295/idb/
 ```
 
-- これは **capture fallback に落ちている** 証拠
-- 以前は fallback 側で `waitForSlideReady` より前にタブを前面化しておらず、非アクティブタブの `getBoundingClientRect()` が 0 になっていた
-- その順序は修正済み
+### 補足
 
-### 症状 B
+- `strings .../*.sqlite*` で抜く方法はかなり壊れやすい
+- 次セッションでは **`glassmoocs_debug_log_text` を background message 経由、または options / popup から見やすく出す導線を追加する方がよい**
+
+---
+
+## 直近で確認した session
+
+### 遅い旧 session
 
 ```text
-2 ページの描画待機がタイムアウトしました。
+glassmoocs-flow-1777514742058-b57rhr
 ```
 
-- 2 枚目以降で `previousSnapshot === snapshot` 扱いのまま待ち続けるパターンがある
-- `waitForSlideReady` は緩めたが、まだ消えていない
+- `createImageBitmap failed` が大量発生していた
 
-### 症状 C
+### 修正後 session
 
 ```text
-最後のページでタイムアウトしているように見える
+glassmoocs-flow-1777522397563-mk3mkd
 ```
 
-- ユーザー観測としてこれが濃厚
-- 最終ページだけ DOM 差分が出にくい / ページ番号だけ進むパターンを疑って調整済み
-- それでも未解消
+この session では:
+
+- `createImageBitmap failed`: 0
+- `falling back to html image rasterization`: 0
+- `using html image rasterization for firefox`: 1
+- `status: done`
 
 ---
 
-## いまの見立て
+## 次に詰めるべき箇所
 
-### 第一仮説
+優先順はこの 3 つ。
 
-**高速 SVG 経路そのものではなく、Slides viewer 上のページ遷移待ちが不安定。**
+1. `waitForSlideReady`
+2. `inlineSlideImages`
+3. `serializeCurrentSlideSvg`
 
-特に `public/slides-export.js` の以下が怪しい。
+いま必要なのは「失敗の切り分け」より **各区間の duration 可視化**。
 
-- `getCurrentPage()`
-- `goToSlide(page)`
-- `waitForSlideReady(page, previousSnapshot)`
-- `getSlideSnapshot(svg)`
+### 次セッションでやること
 
-ページ番号表示は変わっていても、SVG の中身が完全に差し替わる前に同一 snapshot と誤判定している可能性が高い。
-
-### 第二仮説
-
-**高速 SVG 経路が途中失敗し、capture fallback に落ちている。**
-
-ユーザーの体感として「遅い」「他拡張より遅い」が続いているので、
-実際には `processSlidesDownloadBySvg()` が完走せず、
-`processSlidesDownloadByCapture()` に落ちている可能性が高い。
-
-### 第三仮説
-
-**今 Firefox で動いているのが古い temporary addon。**
-
-- Computer Use で popup を開くと保存実行自体はできる
-- ただし structured log が 0 行のまま
-- 一時アドオンの `Reload` をこちらから確実に踏めていない
-
-このため、**修正済みコードが実機に反映されていない** 可能性が常に残っている。
+1. session ごとに上記 3 箇所の `durationMs` を JSON として抜けるようにする
+2. 可能なら `glassmoocs_debug_log_text` を message 経由か options / popup から見やすく出す
+3. そのうえで最長区間を最適化する
 
 ---
 
-## このセッションで入れた主な変更
+## Firefox 実機での実行ルール
 
-### `public/content.js`
+毎回これを守ること。
 
-- ページ内のダウンロードパネルを追加済み
-- Slides キャプチャ権限セクションを in-page で表示できるようにした
-- `glassmoocs_debug_auto_download=1` クエリが付いていると current-page download を自動発火するデバッグ経路を追加
-- 構造化ログ送信を追加
-
-### `public/popup.js` / `public/popup.html`
-
-- popup に Slides キャプチャ権限 UI を追加
-- 権限案内は「常時必要」ではなく「高速経路失敗時だけ必要」に寄せた
-
-### `public/slides-permission.html`
-
-### `public/slides-permission.js`
-
-### `public/slides-permission.css`
-
-- ページ内から専用の小ウィンドウを開いて Slides キャプチャ権限を許可する導線を追加
-
-### `public/background.js`
-
-- Slides を **SVG 優先、capture は fallback** に変更
-- `processSlidesDownloadBySvg()` を追加
-- `processSlidesDownloadByCapture()` を明示的な fallback として分離
-- `serialize-current-slide-svg` / `fetch-image-data-url` / `get-slides-capture-permission` / `open-slides-capture-permission-window` を追加
-- capture fallback 側で、先に対象タブを前面化してから `waitForSlideReady()` を呼ぶよう修正
-- 構造化ログ送信を追加
-
-### `public/slides-export.js`
-
-- SVG を clone して image を data URL にインライン化する経路を追加
-- `serializeCurrentSlideSvg(page)` を追加
-- `getSlideSnapshot()` を `innerHTML.length` だけでなく軽い hash 付きに変更
-- `waitForSlideReady()` を緩め、snapshot が同じでも一定条件で通すように調整
-- 最終ページでは DOM 差分を必須にしない緩和を追加
-- それでもまだ timeout は残っている
-- 構造化ログ送信を追加
+1. `corepack pnpm build`
+2. `about:debugging#/runtime/this-firefox` で temporary addon を `Reload`
+3. MOOCs ページ再読み込み
+4. `この回の資料を保存`
+5. Slides タブは触らない
 
 ---
 
-## ログ周りの現状
+## 既知の事実と注意
 
-### コード上の送信先
-
-ローカル検証で `AGENT_LOG_ENABLED` を true にした場合、以下へ送る。
-
-```text
-http://127.0.0.1:7443/ingest/<sessionId>
-```
-
-### なぜ 7443 なのか
-
-- もともと 7442 を使っていた
-- このローカル環境では `Cursor` も 7442 を listen しており競合した
-- `nc -lk 7442` では `curl` の確認ログすら安定して取れなかった
-- そのため **有効化時の送信先を一時的に 7443 にしている**
-
-### 今使える簡易受け口
-
-`nc` だと HTTP 応答を返さず不便だったので、Python の最小サーバを使った。
-
-```bash
-python3 /tmp/glassmoocs_log_server.py
-```
-
-実際のログファイル:
-
-```text
-artifacts/slides-debug-7443.log
-```
-
-### 現在の注意
-
-- 現コードでは `public/background.js` / `public/content.js` / `public/slides-export.js` の `AGENT_LOG_ENABLED` は **false**
-- structured log を使うときは、ローカル検証ブランチで明示的に true にしてから temporary addon を reload する
-- そのため「ログが流れない」場合は、古いアドオンだけでなく **ログ自体が無効化されたまま** でないかも確認する
+- いまの主問題は `createImageBitmap` ではない
+- `7443` ログは Firefox では取り切れないことがあるので、storage fallback 前提で見る
+- capture fallback が主因だった時期の引き継ぎは古い。現時点では **SVG 経路の中の待機・インライン化・直列化コスト** を見るべき
+- 最新コードでは `corepack pnpm run ci` は通過済み
 
 ---
 
-## 現在の最重要 blocker
+## まず見るべきファイル
 
-### 1. Firefox 実機がまだ最新コードで回せていない可能性
-
-これが一番大きい。
-
-- popup から保存は押せる
-- 失敗内容も見える
-- しかし structured log が取れない
-- よって「修正が効いていない」のか「効いているが別箇所で死んでいる」のか切り分けが甘い
-
-### 2. `waitForSlideReady()` がまだ不十分
-
-特に最後のページで止まる可能性がある。
-
-現状の問題は:
-
-- `currentPage` は変わる
-- しかし `snapshot` が前ページと十分に差分化されない
-- そのまま timeout する
-
-### 3. SVG 経路がどこで失敗して capture fallback に落ちるか未確定
-
-いまのユーザー体感では fallback に落ちている公算が高いが、
-ログ未回収のため「どのステップで落ちたか」はまだ確定していない。
-
----
-
-## 次の担当者が最初にやるべきこと
-
-### 優先度 1
-
-**Firefox の temporary addon を確実に `Reload` する。**
-
-ここが入らないと、それ以降のデバッグ精度が上がらない。
-
-### 優先度 2
-
-structured log を使う場合は `AGENT_LOG_ENABLED=true` にしたうえで `7443` のログ受け口を立て、以下のどちらかで再現する。
-
-1. popup から `このページの資料を保存`
-2. `?glassmoocs_debug_auto_download=1` 付き URL で current-page download 自動発火
-
-見たい hypothesisId:
-
-- `H-CT-A`
-- `H-CT-B`
-- `H-SVG-A`
-- `H-SVG-B`
-- `H-SVG-C`
-- `H-SVG-D`
-- `H-TAB-A`
-
-### 優先度 3
-
-`waitForSlideReady()` の判定をさらに見直す。
-
-次に疑う順:
-
-1. `getCurrentPage()` が Google Slides の UI 変更に弱い
-2. `dispatchArrowKey()` だけでは最後の数ページで遷移が安定しない
-3. `getSlideSnapshot()` が still too weak
-4. 最終ページだけ別 DOM で来る
-
----
-
-## すぐ見るべきファイル
-
-| ファイル                  | 役割                                          |
-| ------------------------- | --------------------------------------------- |
-| `public/slides-export.js` | いま一番怪しい。ページ遷移待ちと SVG 抽出本体 |
-| `public/background.js`    | SVG-first / capture fallback の分岐           |
-| `public/content.js`       | in-page UI と debug auto download             |
-| `public/popup.js`         | popup からの保存起動と権限案内                |
-| `AGENTS.md`               | 実装・デバッグルール                          |
-
----
-
-## 再現メモ
-
-実機で認識できていたページ:
-
-```text
-科目: ICT社会応用論E
-講義: Webアプリに関する基礎的な技術
-ページ: 02: 静的なwebサイト・動的なwebサイト
-このページの候補資料: 1 件
-Slides: 1 件
-```
-
-ユーザー追加観測:
-
-```text
-科目: コンピュータ・サイエンス概論 III & 演習 III
-区分: CS3講義
-講義: CS3講義
-ページ: cs3-04: データの様子の把握・可視化
-最新エラー: 2 ページの描画待機がタイムアウトしました。
-```
-
-さらにユーザー所感として、
-
-```text
-多分最後のページでタイムアウトしてる
-普通にキャプチャにフォールバックされてる気がする
-```
-
-これは現状の見立てと整合する。
-
----
-
-## 備考
-
-- `HANDOFF.md` の以前の内容にあった **`about:blank` タブ問題が主因** という整理は、現時点では古い
-- 今は `about:blank` よりも **Slides ページ遷移待ち / SVG 経路失敗 / capture fallback** の方が主戦場
-- CI はこの環境で `pnpm` 不足のため未実行
-- 構文確認は `node --check public/background.js public/content.js public/slides-export.js` で通している
+| ファイル                                                                                          | 役割                                                                          |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`public/slides-export.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/slides-export.js) | `waitForSlideReady` / `inlineSlideImages` / `serializeCurrentSlideSvg` の本体 |
+| [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js)       | debug log fallback buffer、Firefox 分岐、SVG ラスタライズ                     |
+| [`AGENTS.md`](/Users/tsutsumin/Documents/GitHub/glassmoocs/AGENTS.md)                             | 実行ルールとログ方針                                                          |

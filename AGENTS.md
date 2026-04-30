@@ -47,7 +47,7 @@ flowchart LR
 - **content.js**: MOOCs DOM の解析、資料候補の抽出、ページ内ダウンロード UI、`download-assets` ペイロードの組み立て。
 - **background.js**: `storage.local` のダウンロード状態、キュー処理、`downloads.download`、Slides 用タブの生成・`waitForTabLoad`・ジョブ待ち受け。
 - **slides-export.js**: `docs.google.com` 上で Slides SVG を収集・画像をインライン化して、background に渡す。失敗時のみ表示タブキャプチャへフォールバックする。
-- **popup.js**: アクティブ MOOCs タブへ **`tabs.sendMessage`**（`get-page-context` / `start-course-collection` / `download-current-page`）。状態取得・リセットは **`runtime.sendMessage`** で background へ。Slides 権限は popup または専用許可ウィンドウから `permissions.request`。
+- **popup.js**: アクティブ MOOCs タブへ **`tabs.sendMessage`**（`get-page-context` / `start-course-collection` / `download-current-lecture` / `download-current-page`）。状態取得・リセットは **`runtime.sendMessage`** で background へ。Slides 権限は popup または専用許可ウィンドウから `permissions.request`。
 
 ---
 
@@ -62,14 +62,14 @@ flowchart LR
 
 ### [`public/content.js`](public/content.js)
 
-| 領域                  | 代表関数                                                                                                                                                   |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 設定                  | `getDefaultSettings`, `mergeSettings`, `readSettings`                                                                                                      |
-| ページ装飾            | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls`                                              |
-| URL / ページ文脈      | `parseMoocsUrl`, `getCurrentPageContext`, `extractCourseName`, `extractLectureName`                                                                        |
-| 資料抽出              | `extractAssetCandidates`, `extractLectureEntries`, `extractPageEntries`, `isGoogleSlidesUrl`, `buildGoogleSlidesViewerUrl`, `deriveGoogleDriveDownloadUrl` |
-| ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleCurrentPageDownloadRequest`, `createCollectingState`              |
-| メッセージ            | `handleRuntimeMessage`                                                                                                                                     |
+| 領域                  | 代表関数                                                                                                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 設定                  | `getDefaultSettings`, `mergeSettings`, `readSettings`                                                                                                                                                                |
+| ページ装飾            | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls`                                                                                                        |
+| URL / ページ文脈      | `parseMoocsUrl`, `getCurrentPageContext`, `extractCourseName`, `extractLectureName`                                                                                                                                  |
+| 資料抽出              | `extractAssetCandidates`, `extractLectureEntries`, `extractPageEntries`, `isGoogleSlidesUrl`, `buildGoogleSlidesViewerUrl`, `deriveGoogleDriveDownloadUrl`                                                           |
+| ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleLectureDownloadRequest`, `handleCurrentPageDownloadRequest`, `collectLectureAssetsFromCurrentPage`, `createCollectingState` |
+| メッセージ            | `handleRuntimeMessage`                                                                                                                                                                                               |
 
 補助ファイル:
 
@@ -102,7 +102,7 @@ flowchart LR
 
 ### [`public/popup.js`](public/popup.js) / [`public/popup.html`](public/popup.html)
 
-- 進捗表示、収集トリガ、（あれば）Slides キャプチャ権限要求 UI
+- 進捗表示、科目単位 / 授業回単位 / ページ単位の収集トリガ、（あれば）Slides キャプチャ権限要求 UI
 
 補助ファイル:
 
@@ -186,11 +186,12 @@ flowchart LR
 
 いずれも **`tabs.sendMessage(moocsTabId, message)`** で届く（popup がアクティブタブに送信）。
 
-| type                                 | 送信元 | `message` 主フィールド | `sendResponse`                                                       |
-| ------------------------------------ | ------ | ---------------------- | -------------------------------------------------------------------- |
-| `glassmoocs:get-page-context`        | popup  | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)` |
-| `glassmoocs:start-course-collection` | popup  | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`             |
-| `glassmoocs:download-current-page`   | popup  | なし                   | 同上                                                                 |
+| type                                  | 送信元 | `message` 主フィールド | `sendResponse`                                                       |
+| ------------------------------------- | ------ | ---------------------- | -------------------------------------------------------------------- |
+| `glassmoocs:get-page-context`         | popup  | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)` |
+| `glassmoocs:start-course-collection`  | popup  | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`             |
+| `glassmoocs:download-current-lecture` | popup  | なし                   | 同上                                                                 |
+| `glassmoocs:download-current-page`    | popup  | なし                   | 同上                                                                 |
 
 ### 6.2 `background.js` が処理する `type`
 
@@ -321,7 +322,7 @@ stateDiagram-v2
 
 ### 13.1 構造化ログ（JSON）
 
-バックグラウンド・コンテンツ・（必要なら）`slides-export.js` で共通フォーマットを使う。**`AGENT_LOG_ENABLED` を true にしたローカル検証時だけ有効化する。**
+バックグラウンド・コンテンツ・（必要なら）`slides-export.js` で共通フォーマットを使う。**通常は OFF にし、Options の「構造化デバッグログを有効にする」または URL の `glassmoocs_debug_log=1` で必要時だけ有効化する。**
 
 ```js
 fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
@@ -340,6 +341,8 @@ fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
 
 - `sessionId` はセッション開始時に固定し全ログに付与する。
 - **`.catch(() => {})` 必須**（サーバ未起動で握りつぶす）。
+- `runtime` は `content` / `background` / `slides-export` を入れる。
+- 大きな本文（SVG 全文、data URL、HTML 全体）は送らず、**件数・長さ・URL・hash・要約**に留める。
 
 ### 13.2 ログを置く場所
 
