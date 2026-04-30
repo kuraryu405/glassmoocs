@@ -57,7 +57,7 @@ zip -r ../artifacts/glassmoocs-dist.zip .
 ソースコード提出用 ZIP の作成例:
 
 ```bash
-git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD
+pnpm run package:source
 ```
 
 ## Build Requirements
@@ -109,7 +109,7 @@ zip -r ../artifacts/glassmoocs-dist.zip .
 ソースコード提出用 ZIP の作成例:
 
 ```bash
-git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD
+pnpm run package:source
 ```
 
 ## 開発
@@ -149,7 +149,7 @@ Firefox の一時アドオンはブラウザ再起動で消えるため、継続
 2. 配布用 ZIP を作成する
    - `cd dist && zip -r ../artifacts/glassmoocs-dist.zip .`
 3. レビュー用ソース ZIP を作成する
-   - `git archive --format=zip --output artifacts/glassmoocs-source.zip HEAD`
+   - `pnpm run package:source`
 4. [AMO Developer Hub](https://addons.mozilla.org/en-US/developers/) で `Submit a New Add-on` を開く
 5. `On this site` を選択し、`artifacts/glassmoocs-dist.zip` をアップロードする
 6. 必要に応じて source code 提出で `artifacts/glassmoocs-source.zip` をアップロードする
