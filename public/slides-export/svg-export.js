@@ -101,6 +101,16 @@
       let backgroundSuccessCount = 0;
       let failedCount = 0;
 
+      postAgentLog(
+        'slides-export.js:inlineSlideImages',
+        'inline slide images start',
+        {
+          page: pageIndex,
+          imageNodeCount: imageNodes.length,
+        },
+        'H-SVG-B',
+      );
+
       await mapWithConcurrency(
         imageNodes,
         INLINE_IMAGE_CONCURRENCY,
@@ -143,6 +153,19 @@
             );
             directSuccessCount += 1;
           } catch (directError) {
+            postAgentLog(
+              'slides-export.js:inlineSlideImages',
+              'direct image fetch failed',
+              {
+                page: pageIndex,
+                imageUrl: url.toString(),
+                error: {
+                  message: normalizeText(directError?.message),
+                  name: normalizeText(directError?.name),
+                },
+              },
+              'H-SVG-B',
+            );
             try {
               const dataUrl = await fetchImageViaBackground(url);
               imageNode.setAttribute('href', dataUrl);
@@ -154,6 +177,23 @@
               backgroundSuccessCount += 1;
             } catch (backgroundError) {
               failedCount += 1;
+              postAgentLog(
+                'slides-export.js:inlineSlideImages',
+                'background image fetch failed',
+                {
+                  page: pageIndex,
+                  imageUrl: url.toString(),
+                  directError: {
+                    message: normalizeText(directError?.message),
+                    name: normalizeText(directError?.name),
+                  },
+                  backgroundError: {
+                    message: normalizeText(backgroundError?.message),
+                    name: normalizeText(backgroundError?.name),
+                  },
+                },
+                'H-SVG-B',
+              );
               console.warn(
                 '[glassmoocs] slide image inline failed',
                 pageIndex,
@@ -169,14 +209,14 @@
         'slides-export.js:inlineSlideImages',
         'inline slide images done',
         {
-          pageIndex,
+          page: pageIndex,
           imageNodeCount: imageNodes.length,
           directSuccessCount,
           backgroundSuccessCount,
           failedCount,
           durationMs: Date.now() - startedAt,
         },
-        'H-SVG-D',
+        'H-SVG-B',
       );
     }
 

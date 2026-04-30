@@ -30,6 +30,13 @@
             この科目を収集
           </button>
           <button
+            id="download-lecture-button"
+            type="button"
+            class="secondary-button"
+          >
+            この回の資料を全部保存
+          </button>
+          <button
             id="download-page-button"
             type="button"
             class="secondary-button"
@@ -71,9 +78,38 @@
             クリア
           </button>
         </div>
+        <div id="download-progress" class="popup-progress" hidden>
+          <div class="popup-progress-track">
+            <div id="download-progress-bar" class="popup-progress-bar"></div>
+          </div>
+          <p id="download-progress-label" class="popup-progress-label"></p>
+        </div>
         <div id="download-state" class="popup-status">
           状態を読み込んでいます...
         </div>
+      </section>
+
+      <section class="popup-card">
+        <div class="popup-status-header">
+          <p class="popup-section-title">Debug Log</p>
+          <button
+            id="refresh-debug-log-button"
+            type="button"
+            class="inline-button"
+          >
+            更新
+          </button>
+        </div>
+        <pre id="debug-log-summary" class="popup-debug-summary">
+読み込んでいます...
+        </pre>
+        <textarea
+          id="debug-log-text"
+          class="popup-debug-text"
+          rows="10"
+          readonly
+          spellcheck="false"
+        ></textarea>
       </section>
 
       <footer class="popup-footer">

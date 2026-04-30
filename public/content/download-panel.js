@@ -1,10 +1,14 @@
 (function () {
   function createDownloadPanelComponent(deps) {
     const {
+      AGENT_LOG_HYPOTHESES,
       DOWNLOAD_STATUS,
       buildCurrentPageDownloadPayload,
+      createDebugLogContext,
       collectCourseAssetsFromCurrentPage,
+      collectLectureAssetsFromCurrentPage,
       formatDownloadStateText,
+      getDownloadProgress,
       getCurrentPageContext,
       getDownloadState,
       getSlidesCapturePermissionState,
@@ -18,20 +22,53 @@
     let downloadRefreshTimer = 0;
 
     function getDownloadPanelAnchor() {
-      return (
-        document.querySelector('.content-header') ||
-        document.querySelector('.content-wrapper') ||
-        document.body
+      const pageNavigation = document.querySelector(
+        'nav[aria-label="page navigation"]',
       );
+      if (pageNavigation?.querySelector('.pagination')) {
+        return {
+          node: pageNavigation,
+          placement: 'beforebegin',
+        };
+      }
+
+      const contentHeader = document.querySelector('.content-header');
+      if (contentHeader) {
+        return {
+          node: contentHeader,
+          placement: 'afterend',
+        };
+      }
+
+      const contentWrapper = document.querySelector('.content-wrapper');
+      if (contentWrapper) {
+        return {
+          node: contentWrapper,
+          placement: 'prepend',
+        };
+      }
+
+      return {
+        node: document.body,
+        placement: 'prepend',
+      };
     }
 
-    function mountDownloadPanel(panel, anchor) {
-      if (!anchor || !anchor.parentElement) {
+    function mountDownloadPanel(panel, anchorTarget) {
+      const anchor = anchorTarget?.node;
+      const placement = anchorTarget?.placement || 'prepend';
+
+      if (!anchor || (placement !== 'prepend' && !anchor.parentElement)) {
         document.body.prepend(panel);
         return;
       }
 
-      if (anchor.matches('.content-header')) {
+      if (placement === 'beforebegin') {
+        anchor.insertAdjacentElement('beforebegin', panel);
+        return;
+      }
+
+      if (placement === 'afterend') {
         anchor.insertAdjacentElement('afterend', panel);
         return;
       }
@@ -62,9 +99,21 @@
 
       panels.forEach((panel) => {
         const contextNode = panel.querySelector('.glassmoocs-download-context');
+        const progressNode = panel.querySelector(
+          '.glassmoocs-download-progress',
+        );
+        const progressBarNode = panel.querySelector(
+          '.glassmoocs-download-progress-bar',
+        );
+        const progressLabelNode = panel.querySelector(
+          '.glassmoocs-download-progress-label',
+        );
         const statusNode = panel.querySelector('.glassmoocs-download-status');
         const collectButton = panel.querySelector(
           '[data-glassmoocs-download-action="course"]',
+        );
+        const lectureButton = panel.querySelector(
+          '[data-glassmoocs-download-action="lecture"]',
         );
         const pageButton = panel.querySelector(
           '[data-glassmoocs-download-action="page"]',
@@ -99,6 +148,21 @@
           statusNode.textContent = formatDownloadStateText(state, pageContext);
         }
 
+        const progress = getDownloadProgress(state);
+        if (progressNode instanceof HTMLElement) {
+          progressNode.hidden = !progress;
+        }
+        if (progressBarNode instanceof HTMLElement) {
+          progressBarNode.style.width = progress
+            ? `${progress.percent}%`
+            : '0%';
+        }
+        if (progressLabelNode instanceof HTMLElement) {
+          progressLabelNode.textContent = progress
+            ? `進捗 ${progress.percent}%${progress.label ? ` · ${progress.label}` : ''}`
+            : '';
+        }
+
         const needsPermission = pageNeedsSlidesCapturePermission(
           state,
           slidesCapturePermissionGranted,
@@ -124,6 +188,10 @@
           collectButton.disabled = busy || !pageContext?.courseUrl;
         }
 
+        if (lectureButton instanceof HTMLButtonElement) {
+          lectureButton.disabled = busy || !pageContext?.lectureUrl;
+        }
+
         if (pageButton instanceof HTMLButtonElement) {
           pageButton.disabled =
             busy ||
@@ -143,25 +211,31 @@
     }
 
     async function handleCourseCollectionRequest() {
+      const debugLogContext = createDebugLogContext('course-collection');
       const result = await collectCourseAssetsFromCurrentPage();
-      await requestBackgroundDownload({
-        courseName: result.courseName,
-        assets: result.assets,
-      });
+      await requestBackgroundDownload(
+        {
+          courseName: result.courseName,
+          assets: result.assets,
+        },
+        debugLogContext,
+      );
       return result;
     }
 
     async function handleCurrentPageDownloadRequest() {
       const pageContext = getCurrentPageContext(document, window.location.href);
+      const debugLogContext = createDebugLogContext('current-page-download');
       postAgentLog(
         'content.js:handleCurrentPageDownloadRequest',
         'starting current-page download request',
         {
+          debugLogContext,
           href: window.location.href,
           assetCount: pageContext?.assetCandidates?.length || 0,
           pageTitle: pageContext?.pageTitle || '',
         },
-        'H-CT-B',
+        AGENT_LOG_HYPOTHESES.queue,
       );
 
       const payload = await buildCurrentPageDownloadPayload();
@@ -170,26 +244,41 @@
           'content.js:handleCurrentPageDownloadRequest',
           'current-page download found no assets',
           {
+            debugLogContext,
             href: window.location.href,
             pageTitle: pageContext?.pageTitle || '',
           },
-          'H-CT-A',
+          AGENT_LOG_HYPOTHESES.page,
         );
         throw new Error(
           'このページでダウンロード可能な資料が見つかりませんでした。',
         );
       }
 
-      await requestBackgroundDownload(payload);
+      await requestBackgroundDownload(payload, debugLogContext);
       postAgentLog(
         'content.js:handleCurrentPageDownloadRequest',
         'current-page download request queued',
         {
+          debugLogContext,
           href: window.location.href,
           assetCount: payload.assets.length,
           kinds: payload.assets.map((asset) => asset.kind),
         },
-        'H-CT-B',
+        AGENT_LOG_HYPOTHESES.queue,
+      );
+      return payload;
+    }
+
+    async function handleLectureDownloadRequest() {
+      const debugLogContext = createDebugLogContext('lecture-download');
+      const payload = await collectLectureAssetsFromCurrentPage();
+      await requestBackgroundDownload(
+        {
+          courseName: payload.courseName,
+          assets: payload.assets,
+        },
+        debugLogContext,
       );
       return payload;
     }
@@ -232,6 +321,7 @@
       </div>
       <div class="glassmoocs-download-actions">
         <button type="button" class="glassmoocs-download-button primary" data-glassmoocs-download-action="course">この科目を収集</button>
+        <button type="button" class="glassmoocs-download-button" data-glassmoocs-download-action="lecture">この回の資料を全部保存</button>
         <button type="button" class="glassmoocs-download-button" data-glassmoocs-download-action="page">このページの資料を保存</button>
       </div>
       <div class="glassmoocs-download-permission" hidden>
@@ -242,11 +332,20 @@
         </div>
         <p class="glassmoocs-download-permission-status"></p>
       </div>
+      <div class="glassmoocs-download-progress" hidden>
+        <div class="glassmoocs-download-progress-track">
+          <div class="glassmoocs-download-progress-bar"></div>
+        </div>
+        <p class="glassmoocs-download-progress-label"></p>
+      </div>
       <p class="glassmoocs-download-status"></p>
     `;
 
       const collectButton = panel.querySelector(
         '[data-glassmoocs-download-action="course"]',
+      );
+      const lectureButton = panel.querySelector(
+        '[data-glassmoocs-download-action="lecture"]',
       );
       const pageButton = panel.querySelector(
         '[data-glassmoocs-download-action="page"]',
@@ -262,6 +361,10 @@
         runPanelAction(panel, handleCourseCollectionRequest);
       });
 
+      lectureButton?.addEventListener('click', () => {
+        runPanelAction(panel, handleLectureDownloadRequest);
+      });
+
       pageButton?.addEventListener('click', () => {
         runPanelAction(panel, handleCurrentPageDownloadRequest);
       });
@@ -269,12 +372,13 @@
       permissionButton?.addEventListener('click', async () => {
         if (!(permissionStatusNode instanceof HTMLElement)) return;
         permissionButton.disabled = true;
-        permissionStatusNode.textContent = '許可ウィンドウを開いています...';
+        permissionStatusNode.textContent =
+          '許可ウィンドウを開いています。通常はこのあと自動で許可ダイアログが出ます...';
 
         try {
           await openSlidesCapturePermissionWindow();
           permissionStatusNode.textContent =
-            '許可ウィンドウを開きました。許可後にもう一度保存を実行してください。';
+            '許可ウィンドウを開きました。ダイアログが出ない場合だけ、その中の再試行ボタンを押してください。';
         } catch (error) {
           permissionStatusNode.textContent = normalizeText(
             error?.message,
@@ -299,25 +403,25 @@
           {
             href: window.location.href,
           },
-          'H-CT-A',
+          AGENT_LOG_HYPOTHESES.page,
         );
         panel?.remove();
         return;
       }
 
-      const anchor = getDownloadPanelAnchor();
-      if (!anchor) return;
-
       if (!panel) {
         panel = createDownloadPanel();
-        mountDownloadPanel(panel, anchor);
       }
+
+      const anchor = getDownloadPanelAnchor();
+      mountDownloadPanel(panel, anchor);
 
       scheduleDownloadPanelRefresh();
     }
 
     return {
       handleCourseCollectionRequest,
+      handleLectureDownloadRequest,
       handleCurrentPageDownloadRequest,
       injectDownloadControls,
       scheduleDownloadPanelRefresh,

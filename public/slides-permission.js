@@ -3,6 +3,7 @@
   const api = globalThis.browser || globalThis.chrome;
   const grantButton = document.getElementById('grant-button');
   const statusNode = document.getElementById('status');
+  let requestInFlight = false;
 
   function getRuntimeLastError() {
     return globalThis.chrome?.runtime?.lastError || null;
@@ -102,9 +103,11 @@
     }
   }
 
-  grantButton?.addEventListener('click', async () => {
+  async function requestPermission() {
     if (!(grantButton instanceof HTMLButtonElement)) return;
+    if (requestInFlight) return;
 
+    requestInFlight = true;
     grantButton.disabled = true;
     setStatus('Firefox の確認ダイアログで「許可」を選んでください。');
 
@@ -117,7 +120,7 @@
       }
 
       setStatus(
-        'キャプチャ権限を許可しました。このウィンドウを閉じて保存をやり直してください。',
+        'キャプチャ権限を許可しました。元のページで保存をやり直してください。',
       );
       window.setTimeout(() => {
         window.close();
@@ -130,8 +133,18 @@
         ),
       );
       grantButton.disabled = false;
+    } finally {
+      requestInFlight = false;
     }
+  }
+
+  grantButton?.addEventListener('click', () => {
+    requestPermission();
   });
 
-  refreshPermissionState();
+  refreshPermissionState().finally(() => {
+    window.setTimeout(() => {
+      requestPermission().catch(() => {});
+    }, 0);
+  });
 })();
