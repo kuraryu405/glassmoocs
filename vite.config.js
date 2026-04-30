@@ -8,6 +8,14 @@ export default defineConfig({
       process.env.GLASSMOOCS_DEBUG_LOGS === 'true',
     ),
   },
+  resolve: {
+    alias: {
+      react: 'preact/compat',
+      'react-dom/client': 'preact/compat/client',
+      'react-dom': 'preact/compat',
+      'react/jsx-runtime': 'preact/jsx-runtime',
+    },
+  },
   plugins: [react()],
   build: {
     outDir: 'dist',

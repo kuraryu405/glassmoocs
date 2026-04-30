@@ -10,6 +10,9 @@ overrides:
 importers:
   .:
     dependencies:
+      preact:
+        specifier: ^10.29.1
+        version: 10.29.1
       react:
         specifier: ^19.2.3
         version: 19.2.5
@@ -1183,6 +1186,12 @@ packages:
       }
     engines: { node: ^10 || ^12 || >=14 }
 
+  preact@10.29.1:
+    resolution:
+      {
+        integrity: sha512-gQCLc/vWroE8lIpleXtdJhTFDogTdZG9AjMUpVkDf2iTCNwYNWA+u16dL41TqUDJO4gm2IgrcMv3uTpjd4Pwmg==,
+      }
+
   prelude-ls@1.2.1:
     resolution:
       {
@@ -2042,6 +2051,8 @@ snapshots:
       nanoid: 3.3.11
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  preact@10.29.1: {}
 
   prelude-ls@1.2.1: {}
 

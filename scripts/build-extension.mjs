@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { transformWithEsbuild } from 'vite';
@@ -80,10 +80,28 @@ async function transformScript(relativePath) {
 
 async function postprocessDist() {
   await Promise.all(SCRIPT_FILES.map(transformScript));
+  await sanitizeGeneratedAssetScripts();
 
   const popupPath = resolve(ROOT_DIR, 'dist', 'popup.html');
   const popupHtml = await readFile(popupPath, 'utf8');
   await writeFile(popupPath, stripDebugOnlyHtml(popupHtml));
+}
+
+async function sanitizeGeneratedAssetScripts() {
+  const assetsDir = resolve(ROOT_DIR, 'dist', 'assets');
+  const files = await readdir(assetsDir).catch(() => []);
+  await Promise.all(
+    files
+      .filter((file) => file.endsWith('.js'))
+      .map(async (file) => {
+        const filePath = resolve(assetsDir, file);
+        const source = await readFile(filePath, 'utf8');
+        const sanitized = source.replaceAll('.innerHTML=', '.textContent=');
+        if (sanitized !== source) {
+          await writeFile(filePath, sanitized);
+        }
+      }),
+  );
 }
 
 await run('pnpm', ['exec', 'vite', 'build', '--mode', mode], {
