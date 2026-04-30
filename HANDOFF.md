@@ -2,241 +2,150 @@
 
 ## これは何か
 
-`glassmoocs` の「MOOCs 授業資料を科目・講義ごとに整理してダウンロードする機能」について、
-**コンテキスト 0 から再開するための引き継ぎ**。
-このファイルだけ読めば今どこまで進んでいて、何が壊れていて、次に何をすべきか分かるようにしてある。
+`glassmoocs` の Google Slides 保存まわりについて、次セッションの担当者がそのまま再開するための最新引き継ぎ。
+2026-04-30 時点の Firefox 実機確認を反映している。
 
 ---
 
 ## ブランチ
 
-```
-codecode/course-archive-download
+```text
+main
 ```
 
 ---
 
-## 作業の目的
+## 現状の結論
 
-MOOCs の授業資料を以下の構造で `Downloads/glassmoocs/` に保存する。
+- 直近の Firefox 実機では、Google Slides 保存は **capture fallback ではなく SVG 経路で完走**している
+- 以前遅かった主因は [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js) の `renderSerializedSlidePage()` 内で、Firefox が `createImageBitmap(svg blob)` に毎ページ `InvalidStateError` を返し、**毎ページ HTML image fallback に落ちていたこと**
+- その点は修正済みで、Firefox では最初から `Image` 経由でラスタライズする分岐を入れている
+- 修正後 session では `createImageBitmap failed` は 0 件、`falling back to html image rasterization` も 0 件、`status: done` を確認済み
+
+つまり、**いま詰めるべき主戦場は `createImageBitmap` ではない**。
+次は SVG 経路の中でどこに時間が掛かっているかを定量化して詰める段階。
+
+---
+
+## 今回までに入っている修正
+
+### [`public/slides-export.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/slides-export.js)
+
+- `getSlideSnapshot()` に `getCurrentPage()` を入れた
+- 別ページなのに previous snapshot と同一扱いされる問題を軽減した
+
+### [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js)
+
+- `7443` への structured log 送信に失敗したときの fallback buffer として `glassmoocs_debug_log_buffer` を追加
+- プレーンテキスト mirror として `glassmoocs_debug_log_text` を追加
+- `isFirefoxLike()` を追加
+- `renderSerializedSlidePage()` で Firefox は `createImageBitmap` を通さず、最初から `Image` 経由ラスタライズに変更
+
+---
+
+## structured log の扱い
+
+### 7443 の扱い
+
+- Firefox 側では `7443` 送信が `load_success:false` のままになるケースが続いている
+- そのため [`artifacts/slides-debug-7443.log`](/Users/tsutsumin/Documents/GitHub/glassmoocs/artifacts/slides-debug-7443.log) は **現時点では信頼しない**
+- 代わりに extension storage の fallback buffer を使う
+
+### 現在見るべき storage key
+
+- `glassmoocs_debug_log_buffer`
+- `glassmoocs_debug_log_text`
+- `glassmoocs_download_state`
+
+### Firefox profile 情報
+
+現 UUID:
 
 ```text
-glassmoocs/
-  2026/
-    ICT社会応用論E/
-      Webアプリに関する基礎的な技術 - Webアプリに関する基礎的な技術/
-        01 - はじめに.pdf
-        02_ 静的なwebサイト・動的なwebサイト.pdf
+iniad-glassmorphism@local -> e57cf4da-ba16-4b74-8ab5-316947114258
 ```
 
-- 年度ごとに分かれる
-- 科目ごとに分かれる
-- 講義グループ + 講義名ごとに分かれる
-- 実体 PDF が保存される
-- MOOCs ホームではダウンロード UI を出さない
+storage path:
 
----
-
-## 現在の確認済みダウンロード先
-
-```
-/Users/tsutsumin/Downloads/glassmoocs/
+```text
+~/Library/Application Support/Firefox/Profiles/ksdnla8n.default-release/storage/default/moz-extension+++e57cf4da-ba16-4b74-8ab5-316947114258^userContextId=4294967295/idb/
 ```
 
-直近（2026-04-27 00:11 時点）の実際の内容:
+### 補足
 
-```
-2026/ICT社会応用論E/Webアプリに関する基礎的な技術 - Webアプリに関する基礎的な技術/
-  02_ 静的なwebサイト・動的なwebサイト.pdf   ← 1件のみ成功
-```
+- `strings .../*.sqlite*` で抜く方法はかなり壊れやすい
+- 次セッションでは **`glassmoocs_debug_log_text` を background message 経由、または options / popup から見やすく出す導線を追加する方がよい**
 
 ---
 
-## 実装状態まとめ
+## 直近で確認した session
 
-### 動いているもの
+### 遅い旧 session
 
-| 機能                                                                               | 状態                                         |
-| ---------------------------------------------------------------------------------- | -------------------------------------------- |
-| manifest: `downloads` / `tabs` / `host_permissions`                                | ✅                                           |
-| `background.js` ダウンロードキュー                                                 | ✅                                           |
-| popup → ダウンロード UI                                                            | ✅                                           |
-| content.js: MOOCs URL 解析                                                         | ✅                                           |
-| content.js: 科目ページ巡回                                                         | ✅                                           |
-| content.js: 講義一覧抽出                                                           | ✅                                           |
-| content.js: 資料候補抽出                                                           | ⚠️ 一部のみ（後述）                          |
-| ディレクトリ構造の生成                                                             | ✅ `year/course/lectureGroup - lectureName/` |
-| 動画・viewer を除外するフィルタ                                                    | ✅                                           |
-| 重複エントリのデデュープ（URL 単位）                                               | ✅                                           |
-| Google Slides: `manifest.json` に `optional_permissions` で `docs.google.com` 追加 | ✅                                           |
-| Google Slides: popup に権限要求ボタン追加                                          | ✅                                           |
-| Google Slides: SVG 抽出 → Canvas → JPEG → PDF のパイプライン                       | ✅ `slides-export.js`                        |
-| Google Slides: `/embed` → `/pub` URL 変換 (`buildSlidesViewerUrl`)                 | ✅                                           |
-| Google Slides: `waitForTabLoad` 60 秒タイムアウト                                  | ✅                                           |
-| `recoverStaleState`: リロード時に前回失敗履歴を引き継がない                        | ✅                                           |
-
-### 壊れているもの / 不安定なもの
-
-| 症状                                                    | 推定原因                                                                                                |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| ダウンロード実行時に失敗が大量に積み上がる（87 件など） | `about:blank` タブ問題（後述）が繰り返される。5 回リトライしてもすべて `about:blank` になるケースがある |
-| Google Slides タブが `about:blank` になる               | Firefox が `docs.google.com` をインライン展開できないか、tab create のタイミング問題                    |
-| 科目によっては PDF がまったく落ちない                   | `extractAssetCandidates` が viewer HTML を PDF 候補と誤認している可能性                                 |
-| CI は通る（ESLint / build ともパス）                    | ただし runtime はまだ不安定                                                                             |
-
----
-
-## 直近の主な変更（このセッションで入れたもの）
-
-### `public/background.js`
-
-1. **`recoverStaleState` の過去失敗リセット**
-   - 拡張リロード時に前回の `failed` / `completed` を持ち越さず、リロード直前に進行中だった 1 件だけを記録するように変更。
-   - → 「87 件失敗」のような蓄積はこれで防げるはずだが、`about:blank` 問題が根本的に解消されない限りリトライのたびに 1 件ずつ失敗として積まれる。
-
-2. **`buildSlidesViewerUrl`（新関数）**
-   - `iframe` の `/embed` や `/pubembed` URL を `/pub`（公開スライドショー）に変換。
-   - これにより `waitForTabLoad` が安定しやすくなった。
-
-3. **`about:blank` タブのリトライロジック**
-   - タブ生成を最大 5 回リトライ（2 秒待ち）。全部 `about:blank` なら例外を投げる。
-
-4. **URL デデュープ（`queueDownloads`）**
-   - 同じ viewer URL を複数エントリで重複ダウンロードしていた問題を解消。
-
-### `public/manifest.json`
-
-- `https://docs.google.com/*` を `host_permissions` から `optional_permissions` に移動。
-- これにより Firefox でも動的に権限を付与できる。
-
-### `public/popup.html` / `public/popup.js`
-
-- 「Google スライドを許可」ボタンと権限チェックロジックを追加。
-
-### `public/slides-export.js`
-
-- SVG 抽出 → rasterize → PDF 生成パイプラインを復活（以前一時的に fetchPdf ハンドラで置き換えていたが差し戻し）。
-
----
-
-## 現在の最重要バグ: `about:blank` タブ問題
-
-### 症状
-
-1. `processSlidesDownload` が `docs.google.com/presentation/.../pub` URL でタブを生成する
-2. `waitForTabLoad` が完了を待つ
-3. 完了後の URL が `about:blank`
-4. 5 回リトライしてもすべて `about:blank`
-5. 例外が投げられ、失敗カウントが +1 される
-
-### 仮説
-
-| ID  | 内容                                                                                                 | 証拠                                                                                                    |
-| --- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| H-A | Firefox が `docs.google.com` のナビゲーションを `about:blank` にリダイレクトしている（権限が未付与） | `optional_permissions` を付与していないとコンテンツスクリプトが注入できない。ただしタブ自体は開けるはず |
-| H-B | `tabsCreate` の直後に `waitForTabLoad` を始めるが、タブがまだ作成中で URL が確定していない           | Firefox では `tabs.create` の Promise 解決時点で URL が `about:blank` のことがある                      |
-| H-C | `buildSlidesViewerUrl` の URL が何らかの理由で空文字になっており、`about:blank` タブが作られる       | ログで `viewerUrl` を確認していない                                                                     |
-
-### 次に試すこと
-
-1. `processSlidesDownload` の入口で `viewerUrl` をログに出す
-2. `tabsCreate` 直後の `slidesTab.url` をログに出す
-3. `waitForTabLoad` の各ポーリングで URL 変化をログに出す（すでに一部あるが H-C 対応で viewerUrl も追加）
-4. `about:blank` が H-A 起因なら → 事前に権限付与を必須化するか、`about:debugging` で付与状態を確認してもらう
-5. H-B 起因なら → `tabsCreate` 後に 500ms 待ってから `waitForTabLoad` を呼ぶ
-
----
-
-## いまのコードで特に怪しい箇所
-
-### `public/content.js`
-
-- `extractAssetCandidates` — 何を「資料」として拾うかを決めている。PDF 以外を掴んでいる可能性
-- `deriveGoogleSlidesDownloadUrl` — Slides URL → PDF URL 変換
-- `deriveGoogleDriveDownloadUrl` — Drive preview → ダウンロード URL 変換
-- `extractCourseName` — 年度と科目名の切り分け（以前は `2026` を科目名と誤認していた）
-
-### `public/background.js`
-
-- `buildDownloadFilename` — `year/course/lecture/file` パス生成
-- `queueDownloads` — 失敗時に `SERVER_BAD_CONTENT` しか見えない。失敗した URL を state に残していない
-- `processSlidesDownload` — `about:blank` タブ問題の本体
-
----
-
-## 次セッションの推奨作業順
-
-1. **`about:blank` 問題の根本解決**
-   - `viewerUrl` が空でないか確認（H-C 検証）
-   - Firefox で `docs.google.com` の optional_permissions が付与済みか確認（H-A 検証）
-   - タブ URL がいつ確定するか計測（H-B 検証）
-
-2. **失敗 URL を必ず state に残す**
-   - `queueDownloads` の catch ブロックで `entry.url` / `entry.filename` / `error.message` を `failed` 配列に積む
-   - 今は `SERVER_BAD_CONTENT` しか見えないのでデバッグにならない
-
-3. **`extractAssetCandidates` を PDF 中心に絞る**
-   - `.pdf` 拡張子 / `application/pdf` を指す embed/object / Google Slides のみ対象にする
-   - viewer HTML や動画の誤爆を排除
-
-4. **1 講義限定で再現させる**
-   - 科目全体クロールは後回し。1 講義 1 ファイルで確実に通す
-
-5. **CI を通してリリース**
-   - `corepack pnpm run ci`
-
----
-
-## 既知のコマンド
-
-```bash
-# CI
-corepack pnpm run ci
-
-# ダウンロード先確認
-python3 - <<'PY'
-from pathlib import Path
-p = Path('/Users/tsutsumin/Downloads/glassmoocs')
-print('exists', p.exists())
-if p.exists():
-    for path in sorted(p.rglob('*')):
-        print(path)
-PY
-
-# ダウンロード先を完全にクリアして再テスト（注意: 全データ削除）
-# rm -rf /Users/tsutsumin/Downloads/glassmoocs
+```text
+glassmoocs-flow-1777514742058-b57rhr
 ```
 
----
+- `createImageBitmap failed` が大量発生していた
 
-## 重要ファイル
+### 修正後 session
 
-| ファイル                  | 役割                                                |
-| ------------------------- | --------------------------------------------------- |
-| `public/manifest.json`    | 権限・popup・background 定義                        |
-| `public/background.js`    | ダウンロードキュー・保存パス・完了待ち              |
-| `public/content.js`       | MOOCs DOM 解析・講義巡回・資料候補抽出・ページ内 UI |
-| `public/slides-export.js` | Google Slides ページ内で SVG 抽出 → PDF 生成        |
-| `public/popup.js`         | popup 起動・権限要求                                |
-| `public/popup.html`       | popup UI                                            |
-| `AGENTS.md`               | 実装・デバッグルール（必読）                        |
+```text
+glassmoocs-flow-1777522397563-mk3mkd
+```
 
----
+この session では:
 
-## 過去チャット
-
-- [スライドDL失敗・Firefox対応・SVG抽出](67d4be18-099f-409b-be71-fdff9f36c5f9) — about:blank タブ問題・stale state・URL 変換の経緯が詳しい
+- `createImageBitmap failed`: 0
+- `falling back to html image rasterization`: 0
+- `using html image rasterization for firefox`: 1
+- `status: done`
 
 ---
 
-## このタスクのフェーズ
+## 次に詰めるべき箇所
 
-> **URL 抽出 + ダウンロード経路のデバッグ**フェーズ。UI 追加は終わり。
+優先順はこの 3 つ。
 
-次の担当者は、機能追加より先に:
+1. `waitForSlideReady`
+2. `inlineSlideImages`
+3. `serializeCurrentSlideSvg`
 
-- `about:blank` タブ問題の根本解消
-- 失敗 URL の可視化
-- 1 講義限定での安定動作確認
+いま必要なのは「失敗の切り分け」より **各区間の duration 可視化**。
 
-から始めること。
+### 次セッションでやること
+
+1. session ごとに上記 3 箇所の `durationMs` を JSON として抜けるようにする
+2. 可能なら `glassmoocs_debug_log_text` を message 経由か options / popup から見やすく出す
+3. そのうえで最長区間を最適化する
+
+---
+
+## Firefox 実機での実行ルール
+
+毎回これを守ること。
+
+1. `corepack pnpm build`
+2. `about:debugging#/runtime/this-firefox` で temporary addon を `Reload`
+3. MOOCs ページ再読み込み
+4. `この回の資料を保存`
+5. Slides タブは触らない
+
+---
+
+## 既知の事実と注意
+
+- いまの主問題は `createImageBitmap` ではない
+- `7443` ログは Firefox では取り切れないことがあるので、storage fallback 前提で見る
+- capture fallback が主因だった時期の引き継ぎは古い。現時点では **SVG 経路の中の待機・インライン化・直列化コスト** を見るべき
+- 最新コードでは `corepack pnpm run ci` は通過済み
+
+---
+
+## まず見るべきファイル
+
+| ファイル                                                                                          | 役割                                                                          |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`public/slides-export.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/slides-export.js) | `waitForSlideReady` / `inlineSlideImages` / `serializeCurrentSlideSvg` の本体 |
+| [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js)       | debug log fallback buffer、Firefox 分岐、SVG ラスタライズ                     |
+| [`AGENTS.md`](/Users/tsutsumin/Documents/GitHub/glassmoocs/AGENTS.md)                             | 実行ルールとログ方針                                                          |

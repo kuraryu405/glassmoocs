@@ -6,7 +6,7 @@ MOOCs の現在科目を収集し、`Downloads/glassmoocs/{courseName}/{lectureN
 
 ## Current Phase
 
-Task 5: Firefox 前提に設計を戻し、Slides viewer からの SVG 回収は維持したまま、自前 PDF 生成へ差し替える段階。
+Task 6: Firefox 実機で SVG 経路は完走確認済み。次は `waitForSlideReady` / `inlineSlideImages` / `serializeCurrentSlideSvg` の所要時間を可視化して、最長区間を最適化する段階。
 
 ## Todo
 
@@ -39,13 +39,18 @@ Task 5: Firefox 前提に設計を戻し、Slides viewer からの SVG 回収は
 - 拡張再読み込み後に `rendering/downloading` が残って UI が塞がる問題に対して、background 起動時に stale state を自動で `failed/partial_failed` に復旧するようにした
 - Google Slides の SVG を Firefox 上で JPEG 化し、拡張内で PDF バイナリを自前生成して `downloads.download()` に渡す処理を接続した
 - 大きい PDF を runtime message で返して詰まるのを避けるため、Slides 生成結果の受け渡しを `storage.local` 経由に切り替えた
+- Firefox で `createImageBitmap(svg blob)` が毎ページ `InvalidStateError` を返して HTML image fallback に落ちていた問題を特定した
+- `public/background.js` の `renderSerializedSlidePage()` で Firefox は最初から `Image` 経由に寄せるよう変更し、修正後 session で `createImageBitmap failed: 0` と `status: done` を確認した
+- `7443` structured log が Firefox で取り切れない場合に備え、`glassmoocs_debug_log_buffer` と `glassmoocs_debug_log_text` を storage fallback として追加した
+- `public/slides-export.js` の `getSlideSnapshot()` に `getCurrentPage()` を含め、別ページでも previous snapshot 同一扱いされる揺れを軽減した
 
 ## Next Action
 
-Firefox で実際に Slides exporter の stage が `collect-slide-x/y` と `build-pdf` を通って PDF が保存されるかを確認する。失敗する場合は `storage.local` への一時保存か `downloads.download()` のどちらで止まっているかを詰める。
+Firefox 実機で session ごとに `waitForSlideReady` / `inlineSlideImages` / `serializeCurrentSlideSvg` の `durationMs` を抜けるようにし、最長区間を特定する。並行して `glassmoocs_debug_log_text` を message 経由または options / popup から読み出しやすくする。
 
 ## Open Risks
 
 - リポジトリ内に MOOCs の保存 HTML や fixture がなく、実 DOM に対する抽出確認は実装後の手動確認に依存する
 - Google Slides の viewer DOM は公開 `/d/e/` と private `/d/{id}/embed` で差異がある可能性があり、実ブラウザ確認が必要
-- Firefox での `tabs.saveAsPDF()` は保存ダイアログ前提なので、自動ディレクトリ整理保存の要件にはそのまま使いにくい
+- Firefox では `7443` structured log が `load_success:false` のままになることがあり、storage fallback なしでは計測結果を安定回収できない
+- `strings` による IndexedDB 抽出は壊れやすく、ログ閲覧導線を拡張側に追加しないと次の最適化が進めにくい

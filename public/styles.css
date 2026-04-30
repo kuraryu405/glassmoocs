@@ -550,7 +550,83 @@ html[data-glassmoocs-background='custom'] .glassmoocs-download-status {
   color: rgba(248, 250, 252, 0.88) !important;
 }
 
+.glassmoocs-download-progress[hidden] {
+  display: none !important;
+}
+
+.glassmoocs-download-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.glassmoocs-download-progress-track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.24);
+}
+
+.glassmoocs-download-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9 0%, #0284c7 100%);
+  transition: width 0.22s ease;
+}
+
+.glassmoocs-download-progress-label {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.74) !important;
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-progress-track {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-progress-label {
+  color: rgba(248, 250, 252, 0.82) !important;
+}
+
 .glassmoocs-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.glassmoocs-download-permission {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(14, 116, 144, 0.16);
+  background: rgba(226, 232, 240, 0.48);
+}
+
+.glassmoocs-download-permission[hidden] {
+  display: none !important;
+}
+
+.glassmoocs-download-permission-title,
+.glassmoocs-download-permission-body,
+.glassmoocs-download-permission-status {
+  margin: 0;
+}
+
+.glassmoocs-download-permission-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0f172a !important;
+}
+
+.glassmoocs-download-permission-body,
+.glassmoocs-download-permission-status {
+  color: rgba(15, 23, 42, 0.8) !important;
+}
+
+.glassmoocs-download-permission-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -580,6 +656,18 @@ html[data-glassmoocs-background='custom'] .glassmoocs-download-button {
   color: #f8fafc;
 }
 
+html[data-glassmoocs-background='custom'] .glassmoocs-download-permission {
+  border-color: rgba(125, 211, 252, 0.18);
+  background: rgba(15, 23, 42, 0.24);
+}
+
+html[data-glassmoocs-background='custom'] .glassmoocs-download-permission-title,
+html[data-glassmoocs-background='custom'] .glassmoocs-download-permission-body,
+html[data-glassmoocs-background='custom']
+  .glassmoocs-download-permission-status {
+  color: rgba(248, 250, 252, 0.9) !important;
+}
+
 html[data-glassmoocs-background='custom'] .glassmoocs-download-button.primary {
   background: rgba(56, 189, 248, 0.24);
 }
@@ -607,6 +695,10 @@ html[data-glassmoocs-background='custom'] .glassmoocs-download-button.primary {
   }
 
   .glassmoocs-download-actions {
+    flex-direction: column;
+  }
+
+  .glassmoocs-download-permission-actions {
     flex-direction: column;
   }
 

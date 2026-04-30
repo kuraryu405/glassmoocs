@@ -77,10 +77,71 @@ button {
 }
 
 .popup-context,
-.popup-status {
+.popup-status,
+.popup-debug-summary {
   margin-top: 8px;
   white-space: pre-line;
   color: #334155;
+}
+
+.popup-debug-summary {
+  overflow: auto;
+  max-height: 180px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.popup-debug-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #0f172a;
+  resize: vertical;
+  font:
+    12px/1.45 ui-monospace,
+    'SFMono-Regular',
+    'SF Mono',
+    Consolas,
+    monospace;
+}
+
+.popup-progress[hidden] {
+  display: none !important;
+}
+
+.popup-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.popup-progress-track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.24);
+}
+
+.popup-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9 0%, #0284c7 100%);
+  transition: width 0.22s ease;
+}
+
+.popup-progress-label {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
 }
 
 .popup-actions {
