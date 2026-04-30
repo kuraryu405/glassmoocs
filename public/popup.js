@@ -314,20 +314,10 @@
       : 0;
     const totalEntries = completedCount + failedCount + pendingCount;
     const settledCount = completedCount + failedCount;
-    const stage = normalizeText(state.stage);
-    const stageMatch = stage.match(/(\d+)\s*\/\s*(\d+)/);
-
     let ratio = totalEntries > 0 ? settledCount / totalEntries : 0;
     let label = totalEntries > 0 ? `${settledCount} / ${totalEntries} 件` : '';
 
-    if (stageMatch && totalEntries > 0 && settledCount < totalEntries) {
-      const current = Number(stageMatch[1]) || 0;
-      const total = Number(stageMatch[2]) || 0;
-      const stageRatio =
-        total > 0 ? Math.max(0, Math.min(1, current / total)) : 0;
-      ratio = (settledCount + stageRatio) / totalEntries;
-      label = `${settledCount + 1} / ${totalEntries} 件目 · ${current} / ${total}`;
-    } else if (totalEntries <= 0) {
+    if (totalEntries <= 0) {
       ratio = state.status === 'idle' ? 0 : 1;
       label = state.status === 'collecting' ? '収集中' : '';
     }

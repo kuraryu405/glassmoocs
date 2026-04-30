@@ -10,7 +10,7 @@
 ## ブランチ
 
 ```text
-main
+codecode/options-refresh
 ```
 
 ---
@@ -139,6 +139,7 @@ glassmoocs-flow-1777522397563-mk3mkd
 - `7443` ログは Firefox では取り切れないことがあるので、storage fallback 前提で見る
 - capture fallback が主因だった時期の引き継ぎは古い。現時点では **SVG 経路の中の待機・インライン化・直列化コスト** を見るべき
 - 最新コードでは `corepack pnpm run ci` は通過済み
+- 速度変化とプログレスバー挙動の整理は [`SLIDES_PERFORMANCE.md`](/Users/tsutsumin/Documents/GitHub/glassmoocs/SLIDES_PERFORMANCE.md) を参照
 
 ---
 
