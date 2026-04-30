@@ -1,6 +1,6 @@
 {
   "name": "glassmoocs",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.30.2",
@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "ci": "eslint . && prettier --check . && vite build"
+    "ci": "eslint . && prettier --check . && vite build",
+    "package:source": "./scripts/create-amo-source-zip.sh"
   },
   "dependencies": {
     "react": "^19.2.3",
