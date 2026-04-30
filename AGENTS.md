@@ -314,7 +314,7 @@ stateDiagram-v2
 2. URL 抽出関数を作る（既存は `extractAssetCandidates`）。
 3. `enhancePage()` から呼ぶ UI を差し込む。
 4. 必要なら設定 ON/OFF（content + settings.js）。
-5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `vite build`）。
+5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `pnpm run build:amo`）。
 
 ---
 
@@ -434,7 +434,9 @@ fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
 corepack pnpm run ci
 ```
 
-`package.json` の `ci` は **`eslint . && prettier --check . && vite build`**。
+`package.json` の `ci` は **`eslint . && prettier --check . && pnpm run build:amo`**。
+
+AMO 提出用の `pnpm run build:amo` は構造化デバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を `dist/` から除去する。開発中にログが必要な場合だけ `pnpm run build:dev` を使う。
 
 ---
 

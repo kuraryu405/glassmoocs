@@ -8,16 +8,33 @@
   }
 
   const DOWNLOAD_STATE_STORAGE_KEY = 'glassmoocs_download_state';
-  const DEBUG_LOG_BUFFER_STORAGE_KEY = 'glassmoocs_debug_log_buffer';
-  const DEBUG_LOG_TEXT_STORAGE_KEY = 'glassmoocs_debug_log_text';
+  const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
+  const DEBUG_LOG_BUFFER_STORAGE_KEY = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log_buffer')
+    : '';
+  const DEBUG_LOG_TEXT_STORAGE_KEY = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log_text')
+    : '';
   const SETTINGS_STORAGE_KEY = 'glassmoocs_settings';
   const MESSAGE_TYPES = {
     getState: 'glassmoocs:get-download-state',
     setState: 'glassmoocs:set-download-state',
     resetState: 'glassmoocs:reset-download-state',
-    getDebugLogReport: 'glassmoocs:get-debug-log-report',
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          getDebugLogReport: __GLASSMOOCS_DEBUG_STRING__(
+            'glassmoocs:get-debug-log-report',
+          ),
+        }
+      : {}),
     downloadAssets: 'glassmoocs:download-assets',
-    relayAgentLog: 'glassmoocs:relay-agent-log',
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          relayAgentLog: __GLASSMOOCS_DEBUG_STRING__(
+            'glassmoocs:relay-agent-log',
+          ),
+        }
+      : {}),
     getSlidesCapturePermission: 'glassmoocs:get-slides-capture-permission',
     openSlidesCapturePermissionWindow:
       'glassmoocs:open-slides-capture-permission-window',
@@ -51,7 +68,9 @@
   const DEBUG_LOG_TEXT_LINE_LIMIT = 2400;
   const MAX_PATH_SEGMENT_LENGTH = 120;
   const AGENT_LOG_RUNTIME = 'background';
-  const AGENT_LOG_ENDPOINT = 'http://127.0.0.1:7443/ingest';
+  const AGENT_LOG_ENDPOINT = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('http://127.0.0.1:7443/ingest')
+    : '';
   const ERROR_CODES = {
     canceled: 'canceled',
     capturePermissionRequired: 'capture_permission_required',
@@ -93,14 +112,16 @@
   const AGENT_LOG_SESSION_ID = `glassmoocs-bg-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-  const AGENT_LOG_HYPOTHESES = {
-    queue: 'H-QUEUE-A',
-    tab: 'H-TAB-A',
-    slide: 'H-SLIDE-A',
-    svg: 'H-SVG-A',
-    pdf: 'H-PDF-A',
-    capture: 'H-CAPTURE-A',
-  };
+  const AGENT_LOG_HYPOTHESES = DEBUG_LOGS_ENABLED
+    ? {
+        queue: __GLASSMOOCS_DEBUG_STRING__('H-QUEUE-A'),
+        tab: __GLASSMOOCS_DEBUG_STRING__('H-TAB-A'),
+        slide: __GLASSMOOCS_DEBUG_STRING__('H-SLIDE-A'),
+        svg: __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
+        pdf: __GLASSMOOCS_DEBUG_STRING__('H-PDF-A'),
+        capture: __GLASSMOOCS_DEBUG_STRING__('H-CAPTURE-A'),
+      }
+    : {};
 
   let queueNonce = 0;
   const activeSlidesTabIds = new Set();
@@ -153,6 +174,15 @@
   }
 
   function normalizeDebugLogContext(rawContext, fallbackSessionId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return {
+        enabled: false,
+        endpoint: '',
+        sessionId: normalizeText(fallbackSessionId),
+        source: '',
+      };
+    }
+
     const context =
       rawContext && typeof rawContext === 'object' ? rawContext : {};
 
@@ -192,6 +222,10 @@
   }
 
   function postAgentLog(location, message, data = {}, hypothesisId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     const payload =
       data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     const context = normalizeDebugLogContext(
@@ -228,6 +262,10 @@
   }
 
   function relayAgentLogPayload(payload) {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     const normalizedPayload =
       payload && typeof payload === 'object' && !Array.isArray(payload)
         ? payload
@@ -282,31 +320,34 @@
   }
   // #endregion agent log
 
-  storageGet([SETTINGS_STORAGE_KEY])
-    .then((result) => {
+  if (DEBUG_LOGS_ENABLED) {
+    storageGet([SETTINGS_STORAGE_KEY])
+      .then((result) => {
+        settingsDebugLoggingEnabled =
+          typeof result?.[SETTINGS_STORAGE_KEY]?.debugLoggingEnabled ===
+          'boolean'
+            ? result[SETTINGS_STORAGE_KEY].debugLoggingEnabled
+            : false;
+      })
+      .catch(() => {});
+
+    api.storage?.onChanged?.addListener((changes, areaName) => {
+      if (areaName !== 'local' && areaName !== 'sync') {
+        return;
+      }
+
+      const nextValue = changes?.[SETTINGS_STORAGE_KEY]?.newValue;
+      if (!nextValue || typeof nextValue !== 'object') {
+        settingsDebugLoggingEnabled = false;
+        return;
+      }
+
       settingsDebugLoggingEnabled =
-        typeof result?.[SETTINGS_STORAGE_KEY]?.debugLoggingEnabled === 'boolean'
-          ? result[SETTINGS_STORAGE_KEY].debugLoggingEnabled
+        typeof nextValue.debugLoggingEnabled === 'boolean'
+          ? nextValue.debugLoggingEnabled
           : false;
-    })
-    .catch(() => {});
-
-  api.storage?.onChanged?.addListener((changes, areaName) => {
-    if (areaName !== 'local' && areaName !== 'sync') {
-      return;
-    }
-
-    const nextValue = changes?.[SETTINGS_STORAGE_KEY]?.newValue;
-    if (!nextValue || typeof nextValue !== 'object') {
-      settingsDebugLoggingEnabled = false;
-      return;
-    }
-
-    settingsDebugLoggingEnabled =
-      typeof nextValue.debugLoggingEnabled === 'boolean'
-        ? nextValue.debugLoggingEnabled
-        : false;
-  });
+    });
+  }
 
   function storageGet(keys) {
     try {
@@ -572,6 +613,14 @@
   }
 
   async function getDebugLogReport() {
+    if (!DEBUG_LOGS_ENABLED) {
+      return {
+        text: '',
+        entryCount: 0,
+        sessions: [],
+      };
+    }
+
     const result = await storageGet([
       DEBUG_LOG_BUFFER_STORAGE_KEY,
       DEBUG_LOG_TEXT_STORAGE_KEY,
@@ -2831,6 +2880,16 @@
     }
 
     if (type === MESSAGE_TYPES.getDebugLogReport) {
+      if (!DEBUG_LOGS_ENABLED) {
+        sendResponse({
+          ok: false,
+          error: __GLASSMOOCS_DEBUG_STRING__(
+            'debug log is not available in this build',
+          ),
+        });
+        return false;
+      }
+
       getDebugLogReport()
         .then((report) => sendResponse({ ok: true, report }))
         .catch((error) =>
@@ -2838,7 +2897,7 @@
             ok: false,
             error: normalizeText(
               error?.message,
-              'failed to load debug log report',
+              __GLASSMOOCS_DEBUG_STRING__('failed to load debug log report'),
             ),
           }),
         );
@@ -2884,6 +2943,11 @@
     }
 
     if (type === MESSAGE_TYPES.relayAgentLog) {
+      if (!DEBUG_LOGS_ENABLED) {
+        sendResponse({ ok: false });
+        return false;
+      }
+
       sendResponse({ ok: true });
       relayAgentLogPayload(message?.payload);
       return false;

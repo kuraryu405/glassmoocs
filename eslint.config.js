@@ -20,6 +20,8 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.webextensions,
+        __GLASSMOOCS_ENABLE_DEBUG_LOGS__: 'readonly',
+        __GLASSMOOCS_DEBUG_STRING__: 'readonly',
       },
     },
     plugins: {

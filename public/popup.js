@@ -1,16 +1,27 @@
 (function () {
+  const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
   const MESSAGE_TYPES = {
     getState: 'glassmoocs:get-download-state',
     resetState: 'glassmoocs:reset-download-state',
-    getDebugLogReport: 'glassmoocs:get-debug-log-report',
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          getDebugLogReport: __GLASSMOOCS_DEBUG_STRING__(
+            'glassmoocs:get-debug-log-report',
+          ),
+        }
+      : {}),
     getPageContext: 'glassmoocs:get-page-context',
     startCourseCollection: 'glassmoocs:start-course-collection',
     downloadCurrentLecture: 'glassmoocs:download-current-lecture',
     downloadCurrentPage: 'glassmoocs:download-current-page',
   };
   const DOWNLOAD_STATE_STORAGE_KEY = 'glassmoocs_download_state';
-  const DEBUG_LOG_BUFFER_STORAGE_KEY = 'glassmoocs_debug_log_buffer';
-  const DEBUG_LOG_TEXT_STORAGE_KEY = 'glassmoocs_debug_log_text';
+  const DEBUG_LOG_BUFFER_STORAGE_KEY = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log_buffer')
+    : '';
+  const DEBUG_LOG_TEXT_STORAGE_KEY = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log_text')
+    : '';
   const api = globalThis.browser || globalThis.chrome;
 
   const pageContextNode = document.getElementById('page-context');
@@ -393,7 +404,7 @@
   function formatDebugLogSummary(report) {
     const sessions = Array.isArray(report?.sessions) ? report.sessions : [];
     if (sessions.length === 0) {
-      return 'debug log はまだありません。';
+      return __GLASSMOOCS_DEBUG_STRING__('debug log はまだありません。');
     }
 
     return sessions
@@ -503,8 +514,14 @@
   }
 
   async function refreshDebugLogReport() {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     if (debugLogSummaryNode) {
-      debugLogSummaryNode.textContent = 'debug log を読み込んでいます...';
+      debugLogSummaryNode.textContent = __GLASSMOOCS_DEBUG_STRING__(
+        'debug log を読み込んでいます...',
+      );
     }
 
     try {
@@ -512,7 +529,10 @@
         type: MESSAGE_TYPES.getDebugLogReport,
       });
       if (!response?.ok || !response.report) {
-        throw new Error(response?.error || 'debug log の取得に失敗しました。');
+        throw new Error(
+          response?.error ||
+            __GLASSMOOCS_DEBUG_STRING__('debug log の取得に失敗しました。'),
+        );
       }
 
       if (debugLogSummaryNode) {
@@ -528,7 +548,7 @@
       if (debugLogSummaryNode) {
         debugLogSummaryNode.textContent = normalizeText(
           error?.message,
-          'debug log の取得に失敗しました。',
+          __GLASSMOOCS_DEBUG_STRING__('debug log の取得に失敗しました。'),
         );
       }
       if (debugLogTextNode) {
@@ -680,7 +700,9 @@
   downloadPageButton.addEventListener('click', handleDownloadCurrentPage);
   openSettingsButton.addEventListener('click', handleOpenSettings);
   resetStateButton.addEventListener('click', handleResetState);
-  refreshDebugLogButton?.addEventListener('click', refreshDebugLogReport);
+  if (DEBUG_LOGS_ENABLED) {
+    refreshDebugLogButton?.addEventListener('click', refreshDebugLogReport);
+  }
   grantSlidesPermissionButton?.addEventListener(
     'click',
     handleGrantSlidesPermission,
@@ -693,8 +715,9 @@
         refreshState();
       }
       if (
-        changes[DEBUG_LOG_BUFFER_STORAGE_KEY] ||
-        changes[DEBUG_LOG_TEXT_STORAGE_KEY]
+        DEBUG_LOGS_ENABLED &&
+        (changes[DEBUG_LOG_BUFFER_STORAGE_KEY] ||
+          changes[DEBUG_LOG_TEXT_STORAGE_KEY])
       ) {
         refreshDebugLogReport();
       }
@@ -704,6 +727,8 @@
   checkSlidesPermission();
   loadActivePageContext().finally(() => {
     refreshState();
-    refreshDebugLogReport();
+    if (DEBUG_LOGS_ENABLED) {
+      refreshDebugLogReport();
+    }
   });
 })();

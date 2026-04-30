@@ -36,9 +36,9 @@ pnpm run ci
 
 - `eslint .`
 - `prettier --check .`
-- `vite build`
+- `pnpm run build:amo`
 
-ビルド完了後、Firefox / Chrome に読み込む拡張機能コードは `dist/` に出力されます。AMO に提出する配布パッケージは `dist/` の内容を ZIP 化したものです。
+ビルド完了後、Firefox / Chrome に読み込む拡張機能コードは `dist/` に出力されます。AMO に提出する配布パッケージは `pnpm run build:amo` で生成した `dist/` の内容を ZIP 化したものです。構造化デバッグログを含む検証用ビルドが必要な場合だけ `pnpm run build:dev` を使います。
 
 例:
 
@@ -52,7 +52,7 @@ zip -r ../artifacts/glassmoocs-dist.zip .
 - ソースコード提出用 ZIP には、機械生成された成果物である `dist/` と `artifacts/` を含めません
 - ソースコード提出用 ZIP には、元のソース、設定ファイル、ロックファイル、README を含めます
 - このリポジトリではビルドに `Vite` と `@vitejs/plugin-react` を使用します
-- `public/` 配下のファイルはそのまま拡張機能へコピーされ、`src/options/` 配下の React 設定ページは `vite build` により `dist/` 向けにビルドされます
+- `scripts/build-extension.mjs` が Vite ビルド後に classic script を変換し、AMO 向けビルドではデバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を `dist/` から除去します
 
 ソースコード提出用 ZIP の作成例:
 
@@ -88,9 +88,9 @@ pnpm run ci
 
 - `eslint .`
 - `prettier --check .`
-- `vite build`
+- `pnpm run build:amo`
 
-ビルド完了後、Firefox / Chrome に読み込む拡張機能コードは `dist/` に出力されます。AMO に提出する配布パッケージは `dist/` の内容を ZIP 化したものです。
+ビルド完了後、Firefox / Chrome に読み込む拡張機能コードは `dist/` に出力されます。AMO に提出する配布パッケージは `pnpm run build:amo` で生成した `dist/` の内容を ZIP 化したものです。構造化デバッグログを含む検証用ビルドが必要な場合だけ `pnpm run build:dev` を使います。
 
 例:
 
@@ -104,7 +104,7 @@ zip -r ../artifacts/glassmoocs-dist.zip .
 - ソースコード提出用 ZIP には、機械生成された成果物である `dist/` と `artifacts/` を含めません
 - ソースコード提出用 ZIP には、元のソース、設定ファイル、ロックファイル、README を含めます
 - このリポジトリではビルドに `Vite` と `@vitejs/plugin-react` を使用します
-- `public/` 配下のファイルはそのまま拡張機能へコピーされ、`src/options/` 配下の React 設定ページは `vite build` により `dist/` 向けにビルドされます
+- `scripts/build-extension.mjs` が Vite ビルド後に classic script を変換し、AMO 向けビルドではデバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を `dist/` から除去します
 
 ソースコード提出用 ZIP の作成例:
 
