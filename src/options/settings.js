@@ -3,7 +3,10 @@ export const BACKGROUND_IMAGE_STORAGE_KEY = 'glassmoocs_background_image';
 const LEGACY_BACKGROUND_STORAGE_KEY = 'iniad_bg_image';
 export const COLOR_MODES = {
   full: 'full',
+  badge: 'badge',
+  icon: 'icon',
 };
+const VALID_COLOR_MODES = new Set(Object.values(COLOR_MODES));
 export const DEFAULT_TAB_COLORS = {
   attendanceTest: '#f59e0b',
   attendanceAssignment: '#06b6d4',
@@ -73,6 +76,7 @@ const DISPLAY_KEY_LABELS = {
  * @property {boolean} colorTabsEnabled
  * @property {{attendanceTest: string, attendanceAssignment: string, assignment: string, check: string, slide: string}} tabColors
  * @property {boolean} reloadAfterSubmit
+ * @property {boolean} debugLoggingEnabled
  */
 
 function getExtensionStorage() {
@@ -174,6 +178,7 @@ export function createDefaultSettings() {
     colorTabsEnabled: true,
     tabColors: { ...DEFAULT_TAB_COLORS },
     reloadAfterSubmit: false,
+    debugLoggingEnabled: false,
   };
 }
 
@@ -223,7 +228,9 @@ export function mergeSettings(rawSettings) {
       ),
       next: mergeShortcut(defaults.shortcuts.next, rawShortcuts.next),
     },
-    tabColorMode: COLOR_MODES.full,
+    tabColorMode: VALID_COLOR_MODES.has(raw.tabColorMode)
+      ? raw.tabColorMode
+      : defaults.tabColorMode,
     colorTabsEnabled:
       typeof raw.colorTabsEnabled === 'boolean'
         ? raw.colorTabsEnabled
@@ -233,6 +240,10 @@ export function mergeSettings(rawSettings) {
       typeof raw.reloadAfterSubmit === 'boolean'
         ? raw.reloadAfterSubmit
         : defaults.reloadAfterSubmit,
+    debugLoggingEnabled:
+      typeof raw.debugLoggingEnabled === 'boolean'
+        ? raw.debugLoggingEnabled
+        : defaults.debugLoggingEnabled,
   };
 }
 
@@ -355,12 +366,20 @@ export function validateSettings(settings) {
     errors.push('前のタブと次のタブに同じショートカットは使えません。');
   }
 
+  if (!VALID_COLOR_MODES.has(settings.tabColorMode)) {
+    errors.push('タブ表示モードが不正です。');
+  }
+
   TAB_COLOR_OPTIONS.forEach(({ key, label }) => {
     const color = settings.tabColors?.[key];
     if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
       errors.push(`${label}の色が不正です。`);
     }
   });
+
+  if (typeof settings.debugLoggingEnabled !== 'boolean') {
+    errors.push('デバッグログ設定が不正です。');
+  }
 
   return errors;
 }

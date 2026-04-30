@@ -1,356 +1,389 @@
-import { useEffect, useState } from 'react';
+import { shortcutToLabel } from './settings.js';
 import {
-  createDefaultSettings,
-  DEFAULT_TAB_COLORS,
-  isModifierOnlyKey,
-  loadBackgroundImage,
-  loadSettings,
-  saveBackgroundImage,
-  saveSettings,
-  shortcutFromEvent,
-  shortcutToLabel,
-  TAB_COLOR_OPTIONS,
-  validateSettings,
-} from './settings.js';
-
-const BACKGROUND_URL_ERROR =
-  '背景画像は http:// または https:// のURLだけ使えます。';
-const LOAD_ERROR_MESSAGE =
-  '設定の読み込みに失敗しました。初期値で表示しています。';
-const SAVE_ERROR_MESSAGE =
-  '設定の保存に失敗しました。アドオンを再読み込みしてください。';
-const SAVE_SUCCESS_MESSAGE =
-  '保存しました。開いているMOOCSページにも自動で反映されます。';
+  BACKGROUND_SHORTCUT_LABEL,
+  LOCKED_TAB_MODE_COPY,
+  SECONDARY_TAB_COLOR_OPTIONS,
+  TAB_THEME_PRESETS,
+} from './constants.js';
+import { SectionHeading } from './components/SectionHeading.jsx';
+import { ToggleCard } from './components/ToggleCard.jsx';
+import { ShortcutRecorder } from './components/ShortcutRecorder.jsx';
+import { ThemePresetButton } from './components/ThemePresetButton.jsx';
+import {
+  BackgroundScenePreview,
+  TabAppearancePreview,
+} from './components/TabPreviews.jsx';
+import { TabColorField } from './components/TabColorField.jsx';
+import { useOptionsSettings } from './hooks/useOptionsSettings.js';
+import { getActiveThemeKey, getBackgroundPreviewHost } from './utils.js';
 
 export default function App() {
-  const [settings, setSettings] = useState(createDefaultSettings);
-  const [backgroundUrl, setBackgroundUrl] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [recording, setRecording] = useState(null);
-  const [errors, setErrors] = useState([]);
-  const [savedMessage, setSavedMessage] = useState('');
+  const {
+    settings,
+    backgroundUrl,
+    loading,
+    recording,
+    tabDetailsOpen,
+    errors,
+    savedMessage,
+    isDirty,
+    hasStoredDataImage,
+    backgroundInputValue,
+    backgroundIsValid,
+    setRecording,
+    setTabDetailsOpen,
+    setColorTabsEnabled,
+    setDebugLoggingEnabled,
+    setReloadAfterSubmit,
+    setTabColor,
+    setTabTheme,
+    resetTabColors,
+    handleBackgroundUrlChange,
+    clearBackgroundImage,
+    resetDefaults,
+    handleSave,
+  } = useOptionsSettings();
 
-  function clearFeedback() {
-    setSavedMessage('');
-    setErrors([]);
-  }
-
-  function applySettingsPatch(patch) {
-    setSettings((current) => ({
-      ...current,
-      ...patch,
-    }));
-    clearFeedback();
-  }
-
-  function validateBackgroundUrl(value) {
-    const normalized = value.trim();
-    if (!normalized) return '';
-
-    try {
-      const { protocol } = new URL(normalized);
-      if (protocol === 'http:' || protocol === 'https:') {
-        return '';
-      }
-    } catch {
-      return BACKGROUND_URL_ERROR;
-    }
-
-    return BACKGROUND_URL_ERROR;
-  }
-
-  function getValidationErrors() {
-    const nextErrors = validateSettings(settings);
-    const backgroundError = validateBackgroundUrl(backgroundUrl);
-    if (backgroundError) {
-      nextErrors.push(backgroundError);
-    }
-    return nextErrors;
-  }
-
-  useEffect(() => {
-    let mounted = true;
-
-    Promise.all([loadSettings(), loadBackgroundImage()])
-      .then(([loadedSettings, loadedBackgroundImage]) => {
-        if (!mounted) return;
-
-        setSettings(loadedSettings);
-        setBackgroundUrl(loadedBackgroundImage);
-      })
-      .catch(() => {
-        if (!mounted) return;
-
-        setErrors([LOAD_ERROR_MESSAGE]);
-      })
-      .finally(() => {
-        if (!mounted) return;
-        setLoading(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!recording) return undefined;
-
-    const handleKeyDown = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (event.key === 'Escape') {
-        setRecording(null);
-        return;
-      }
-
-      if (isModifierOnlyKey(event.key)) {
-        return;
-      }
-
-      const nextShortcut = shortcutFromEvent(event);
-      if (!nextShortcut) return;
-
-      setSettings((current) => ({
-        ...current,
-        shortcuts: {
-          ...current.shortcuts,
-          [recording]: nextShortcut,
-        },
-      }));
-      clearFeedback();
-      setRecording(null);
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [recording]);
-
-  function setReloadAfterSubmit(reloadAfterSubmit) {
-    applySettingsPatch({ reloadAfterSubmit });
-  }
-
-  function setColorTabsEnabled(colorTabsEnabled) {
-    applySettingsPatch({ colorTabsEnabled });
-  }
-
-  function setTabColor(kind, color) {
-    setSettings((current) => ({
-      ...current,
-      tabColors: {
-        ...current.tabColors,
-        [kind]: color,
-      },
-    }));
-    clearFeedback();
-  }
-
-  function resetTabColors() {
-    setSettings((current) => ({
-      ...current,
-      tabColors: { ...DEFAULT_TAB_COLORS },
-    }));
-    clearFeedback();
-  }
-
-  function handleBackgroundUrlChange(event) {
-    setBackgroundUrl(event.target.value);
-    clearFeedback();
-  }
-
-  function clearBackgroundImage() {
-    setBackgroundUrl('');
-    clearFeedback();
-  }
-
-  function resetDefaults() {
-    setSettings(createDefaultSettings());
-    setBackgroundUrl('');
-    clearFeedback();
-    setRecording(null);
-  }
-
-  async function handleSave() {
-    const nextErrors = getValidationErrors();
-
-    if (nextErrors.length > 0) {
-      setErrors(nextErrors);
-      setSavedMessage('');
-      return;
-    }
-
-    try {
-      await saveSettings(settings);
-      await saveBackgroundImage(backgroundUrl);
-      setErrors([]);
-      setSavedMessage(SAVE_SUCCESS_MESSAGE);
-    } catch {
-      setSavedMessage('');
-      setErrors([SAVE_ERROR_MESSAGE]);
-    }
-  }
-
-  const backgroundInputValue = backgroundUrl.startsWith('data:')
-    ? ''
-    : backgroundUrl;
-  const backgroundPreviewUrl = backgroundInputValue.trim();
+  const backgroundPreviewUrl = backgroundUrl.trim();
   const backgroundPreviewHost = getBackgroundPreviewHost(backgroundPreviewUrl);
-  const backgroundIsValid = !validateBackgroundUrl(backgroundUrl);
+  const slideTabColor = settings.tabColors.slide;
+  const activeThemeKey = getActiveThemeKey(settings.tabColors);
+  const backgroundNote = hasStoredDataImage
+    ? '保存済みの背景画像があります。URLを入力して保存すると上書きします。'
+    : backgroundUrl
+      ? '保存前でも下のライブプレビューで見え方を確認できます。'
+      : '背景画像は未設定です。';
 
   return (
     <main className="settings-shell">
       <section className="hero-card">
         <div className="hero-copy">
-          <p className="eyebrow">GlassMOOCs</p>
-          <h1>MOOCSを、もっと手に馴染む画面へ。</h1>
+          <p className="eyebrow">GLASSMOOCS SETTINGS</p>
+          <h1>GlassMOOCs Options</h1>
           <p className="lead">
-            スライド上部の番号タブをショートカットで移動し、出席テストや課題ページを色で見分けられるようにします。
+            毎日触る項目だけを、拡張機能らしい密度でまとめた設定画面です。
           </p>
+          <p className="hero-caption">
+            見た目を飾るより、タブの判別・移動・背景確認をすばやく調整できる構成に寄せています。
+          </p>
+
+          <div className="hero-pills" aria-label="主な機能">
+            <span>表示</span>
+            <span>ショートカット</span>
+            <span>提出後の動作</span>
+            <span>背景</span>
+            <span>ログ</span>
+          </div>
+        </div>
+
+        <div className="hero-stage" aria-hidden="true">
+          <div className="hero-preview">
+            <div className="hero-preview-bar">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="hero-preview-tabs">
+              <span className="hero-preview-tab warm">出席</span>
+              <span className="hero-preview-tab cool">資料</span>
+              <span className="hero-preview-tab accent">課題</span>
+            </div>
+            <div className="hero-preview-panel">
+              <p className="field-label">クイックサマリー</p>
+              <strong>必要な設定を上から順に整える</strong>
+              <small>
+                色分け、ショートカット、背景画像の3点をここから確認できます。
+              </small>
+            </div>
+          </div>
+
+          <div className="hero-facts">
+            <div className="hero-fact">
+              <small>ショートカット</small>
+              <strong>
+                {shortcutToLabel(settings.shortcuts.previous)} /{' '}
+                {shortcutToLabel(settings.shortcuts.next)}
+              </strong>
+            </div>
+            <div className="hero-fact">
+              <small>タブ配色</small>
+              <strong>
+                {settings.colorTabsEnabled
+                  ? activeThemeKey
+                    ? TAB_THEME_PRESETS.find(
+                        (preset) => preset.key === activeThemeKey,
+                      )?.label
+                    : 'カスタム'
+                  : 'OFF'}
+              </strong>
+            </div>
+            <div className="hero-fact">
+              <small>背景画像</small>
+              <strong>{backgroundPreviewHost || '未設定'}</strong>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="settings-grid" aria-busy={loading}>
-        <div className="settings-column">
-          <article className="panel shortcut-panel">
-            <SectionHeading
-              step="01"
-              title="タブ移動ショートカット"
-              description="ボタンを押してから、使いたいキーの組み合わせを入力してください。"
-            />
+      <section className="settings-flow" aria-busy={loading}>
+        <article id="tab-display" className="panel panel-emphasis">
+          <SectionHeading
+            eyebrow="表示"
+            title="タブ表示"
+            description="色分けを使うか決めて、必要ならテーマと詳細色を調整します。"
+          />
 
-            <ShortcutRecorder
-              title="前のタブ"
-              value={settings.shortcuts.previous}
-              active={recording === 'previous'}
-              onStart={() => setRecording('previous')}
-            />
-            <ShortcutRecorder
-              title="次のタブ"
-              value={settings.shortcuts.next}
-              active={recording === 'next'}
-              onStart={() => setRecording('next')}
-            />
-
-            <p className="hint">
-              入力欄、Markdownエディタ、コードエディタ上では誤爆防止のためタブ移動ショートカットを無効化します。
-            </p>
-          </article>
-
-          <article className="panel">
-            <SectionHeading
-              step="03"
-              title="提出後の自動リロード"
-              description="出席課題や課題の「提出」成功ダイアログを閉じたあと、ページを自動で再読み込みします。"
-            />
-
-            <ToggleCard
-              enabled={settings.reloadAfterSubmit}
-              title="提出後にページを更新する"
-              description="初期値はOFFです。保存成功メッセージのあとにだけ再読み込みします。"
-              onToggle={() => setReloadAfterSubmit(!settings.reloadAfterSubmit)}
-            />
-          </article>
-        </div>
-
-        <div className="settings-column">
-          <article className="panel">
-            <SectionHeading
-              step="02"
-              title="タブ表示"
-              description="出席テスト、出席課題、課題、理解度確認、スライドをタイトルから自動判定して、全面カラーで表示します。色もカテゴリごとに調整できます。"
-            />
-
+          <div className="panel-stack">
             <ToggleCard
               enabled={settings.colorTabsEnabled}
-              title="全面カラーを使う"
-              description="ON のときだけ、タブ全体を色で塗って種類を見分けます。"
+              title="タブを色分けする"
+              description="画面上部のタブを種類ごとに見分けやすくします。OFF にしても色設定は保持されます。"
               onToggle={() => setColorTabsEnabled(!settings.colorTabsEnabled)}
             />
 
-            <div className="tab-color-editor">
-              <div className="tab-color-header">
-                <p className="field-label">カテゴリ別カラー</p>
-                <button
-                  type="button"
-                  className="ghost-button compact"
-                  onClick={resetTabColors}
-                >
-                  既定色に戻す
-                </button>
-              </div>
-
-              <div className="tab-color-grid">
-                {TAB_COLOR_OPTIONS.map((option) => (
-                  <TabColorField
-                    key={option.key}
-                    label={option.label}
-                    value={settings.tabColors[option.key]}
-                    onChange={(color) => setTabColor(option.key, color)}
-                  />
-                ))}
-              </div>
-
-              <p className="tab-color-note">
-                タブの種類はタイトル内の文言から自動判定しています。出席テスト、
-                出席課題、課題、理解度確認、スライドなどの表記ゆれや例外には完全
-                には対応できないため、100%の精度は保証していません。
-              </p>
-            </div>
-          </article>
-
-          <article className="panel">
-            <SectionHeading
-              step="04"
-              title="背景画像"
-              description="初期状態では背景なしです。画像URLを貼るか、Shift+Alt+Bで設定できます。"
-            />
-
-            <div className="background-editor">
-              <div className="background-preview-card">
-                <div
-                  className={
-                    backgroundPreviewUrl && backgroundIsValid
-                      ? 'background-preview-image active'
-                      : 'background-preview-image'
-                  }
-                  style={
-                    backgroundPreviewUrl && backgroundIsValid
-                      ? {
-                          '--background-preview-url': `url("${backgroundPreviewUrl}")`,
-                        }
-                      : undefined
-                  }
-                  aria-hidden="true"
-                />
-                <div className="background-preview-copy">
-                  <strong>
-                    {backgroundPreviewUrl && backgroundIsValid
-                      ? '背景プレビュー'
-                      : '背景画像は未設定'}
-                  </strong>
+            <div className="tab-basics-grid">
+              <div className="mode-locked-card" aria-label="タブ表示モード">
+                <div className="mode-preview" data-mode="full">
+                  <span>1</span>
+                  <span>2</span>
+                  <span>3</span>
+                </div>
+                <div className="mode-locked-copy">
+                  <p className="field-label">表示モード</p>
+                  <strong>{LOCKED_TAB_MODE_COPY.title}で固定</strong>
                   <small>
-                    {backgroundPreviewUrl && backgroundIsValid
-                      ? backgroundPreviewHost
-                      : '保存すると、MOOCSページにも自動で反映されます。'}
+                    {LOCKED_TAB_MODE_COPY.description}
+                    色の違いだけに集中できるよう、見分け方は1種類に絞っています。
                   </small>
                 </div>
               </div>
 
+              <div className="theme-picker-card">
+                <div className="theme-picker-copy">
+                  <p className="field-label">おすすめテーマ</p>
+                  <p className="tab-color-subtitle">
+                    最初から全色を決めなくても使えるように、まとめて切り替えられるテーマを用意しました。
+                  </p>
+                </div>
+                <div className="theme-preset-grid">
+                  {TAB_THEME_PRESETS.map((preset) => (
+                    <ThemePresetButton
+                      key={preset.key}
+                      preset={preset}
+                      active={activeThemeKey === preset.key}
+                      onSelect={() => setTabTheme(preset.colors)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="slide-color-focus">
+              <div className="slide-color-focus-copy">
+                <p className="field-label">現在の見え方</p>
+                <p className="tab-color-subtitle">
+                  「資料」タブが授業資料に対応します。まずこの色だけ整えると、日常利用での迷いが減ります。
+                </p>
+              </div>
+
+              <TabAppearancePreview
+                enabled={settings.colorTabsEnabled}
+                tabColors={settings.tabColors}
+              />
+              <p className="tab-preview-note">
+                下の色設定を変更すると、このプレビューに反映されます。
+              </p>
+
+              <TabColorField
+                label="スライド / 資料"
+                value={slideTabColor}
+                onChange={(color) => setTabColor('slide', color)}
+                description="背景プレビューにも同じ色を反映します。選択中はチェックで表示します。"
+                featured
+              />
+            </div>
+
+            <div className="detail-disclosure">
+              <div className="detail-disclosure-copy">
+                <p className="field-label">詳細設定</p>
+                <p className="tab-color-subtitle">
+                  出席や課題など、他カテゴリの色も必要ならここで個別に調整できます。
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost-button"
+                aria-expanded={tabDetailsOpen}
+                onClick={() => setTabDetailsOpen((current) => !current)}
+              >
+                {tabDetailsOpen
+                  ? '詳細カラー設定を閉じる'
+                  : '詳細カラー設定を開く'}
+              </button>
+            </div>
+
+            {tabDetailsOpen && (
+              <div className="tab-color-editor">
+                <div className="tab-color-header">
+                  <div>
+                    <p className="field-label">カテゴリごとの色</p>
+                    <p className="tab-color-subtitle">
+                      パレットから選ぶか、カラーピッカーで細かく調整できます。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-button compact"
+                    onClick={resetTabColors}
+                  >
+                    既定色に戻す
+                  </button>
+                </div>
+
+                <div className="tab-color-grid">
+                  {SECONDARY_TAB_COLOR_OPTIONS.map((option) => (
+                    <TabColorField
+                      key={option.key}
+                      label={option.label}
+                      value={settings.tabColors[option.key]}
+                      onChange={(color) => setTabColor(option.key, color)}
+                    />
+                  ))}
+                </div>
+
+                <p className="tab-color-note">
+                  タブの種類はタイトル内の文言から自動判定しています。表記ゆれや例外には完全には対応できないため、100%の精度は保証していません。
+                </p>
+              </div>
+            )}
+          </div>
+        </article>
+
+        <div className="secondary-grid">
+          <article id="shortcuts" className="panel">
+            <SectionHeading
+              eyebrow="操作"
+              title="ショートカット"
+              description="前後のタブ移動に使うキーを設定します。入力欄では自動で無効化されます。"
+            />
+
+            <div className="panel-stack">
+              <ShortcutRecorder
+                title="前のタブへ移動"
+                value={settings.shortcuts.previous}
+                active={recording === 'previous'}
+                onStart={() => setRecording('previous')}
+              />
+              <ShortcutRecorder
+                title="次のタブへ移動"
+                value={settings.shortcuts.next}
+                active={recording === 'next'}
+                onStart={() => setRecording('next')}
+              />
+
+              <div className="support-block">
+                <p className="hint">
+                  注意: 文字入力欄では自動で無効化します。`Cmd + ← / →`
+                  はブラウザやOS標準操作と競合する場合があります。
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <article id="post-submit" className="panel">
+            <SectionHeading
+              eyebrow="動作"
+              title="提出後の動作"
+              description="提出完了後にページを更新するかを切り替えます。"
+            />
+
+            <div className="panel-stack">
+              <ToggleCard
+                enabled={settings.reloadAfterSubmit}
+                title="提出後にページを更新する"
+                description="提出済み表示を早く反映したいときに有効です。初期値は OFF です。"
+                onToggle={() =>
+                  setReloadAfterSubmit(!settings.reloadAfterSubmit)
+                }
+              />
+
+              <div className="support-block">
+                <p className="hint">
+                  ON
+                  にすると提出完了後に必要な画面だけ再読み込みします。提出済み表示の反映を早めたいとき向けです。
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <article id="debug-log" className="panel">
+            <SectionHeading
+              eyebrow="診断"
+              title="デバッグログ"
+              description="ダウンロード不具合の調査用です。通常は OFF のままにします。"
+            />
+
+            <div className="panel-stack">
+              <ToggleCard
+                enabled={settings.debugLoggingEnabled}
+                title="構造化デバッグログを有効にする"
+                description="content / background / Slides exporter の主要イベントを 127.0.0.1:7443 に送ります。"
+                onToggle={() =>
+                  setDebugLoggingEnabled(!settings.debugLoggingEnabled)
+                }
+              />
+
+              <div className="support-block">
+                <p className="hint">
+                  ログ受け口を立ててから使ってください。通常動作では不要です。
+                  `glassmoocs_debug_log=1`
+                  をURLに付けると、そのページだけ一時的に有効化することもできます。
+                </p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <article id="background" className="panel">
+          <SectionHeading
+            eyebrow="背景"
+            title="背景画像"
+            description="MOOCS の背景画像 URL を設定します。下でプレビューも確認できます。"
+          />
+
+          <div className="panel-stack">
+            <div className="shortcut-callout">
+              <span className="shortcut-chip">{BACKGROUND_SHORTCUT_LABEL}</span>
+              <p>MOOCS上で背景設定パネルをすぐ開くショートカットです。</p>
+            </div>
+
+            <div className="background-editor">
               <label className="field-label" htmlFor="background-url">
                 画像URL
               </label>
               <input
                 id="background-url"
-                className="text-field"
+                className="text-field url-field"
                 type="url"
                 placeholder="https://example.com/background.jpg"
                 value={backgroundInputValue}
                 onChange={handleBackgroundUrlChange}
               />
+              {backgroundPreviewHost && (
+                <p className="field-meta">
+                  読み込み先: {backgroundPreviewHost}
+                </p>
+              )}
+
+              <div className="support-block">
+                <p className="hint">
+                  `http://` または `https://` の URL を使えます。`jpg` `png`
+                  `webp` など、ブラウザが表示できる画像形式を想定しています。
+                </p>
+                <p className="hint">
+                  明るすぎる画像や重い画像は、文字の読みやすさや表示速度に影響することがあります。
+                </p>
+              </div>
 
               <div className="background-actions">
                 <button
@@ -362,25 +395,45 @@ export default function App() {
                 </button>
               </div>
 
-              <p className="background-note">
-                {backgroundUrl
-                  ? '入力したURLを次回保存時に反映します。'
-                  : '背景画像は未設定です。'}
-              </p>
+              <p className="background-note">{backgroundNote}</p>
+
+              <BackgroundScenePreview
+                backgroundPreviewUrl={backgroundPreviewUrl}
+                backgroundIsValid={backgroundIsValid}
+                backgroundPreviewHost={backgroundPreviewHost}
+                enabled={settings.colorTabsEnabled}
+                tabColors={settings.tabColors}
+              />
             </div>
-          </article>
-        </div>
+          </div>
+        </article>
       </section>
 
-      <section className="status-panel">
-        {errors.length > 0 && (
-          <div className="message error" role="alert">
-            {errors.map((error) => (
-              <p key={error}>{error}</p>
-            ))}
-          </div>
-        )}
-        {savedMessage && <p className="message success">{savedMessage}</p>}
+      <section className={isDirty ? 'status-panel dirty' : 'status-panel'}>
+        <div className="status-copy">
+          <p className="status-kicker">
+            {loading
+              ? '設定を読み込み中です'
+              : isDirty
+                ? '変更があります。保存するとMOOCSページにも反映されます。'
+                : 'すべて保存済みです。'}
+          </p>
+          {!errors.length && !loading && (
+            <p className="status-meta">
+              {isDirty
+                ? '右側の保存ボタンが有効になっています。'
+                : 'MOOCSページにも反映されています。'}
+            </p>
+          )}
+          {errors.length > 0 && (
+            <div className="message error" role="alert">
+              {errors.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          )}
+          {savedMessage && <p className="status-meta">{savedMessage}</p>}
+        </div>
 
         <div className="actions">
           <button
@@ -394,101 +447,12 @@ export default function App() {
             type="button"
             className="save-button"
             onClick={handleSave}
-            disabled={loading}
+            disabled={loading || !isDirty}
           >
-            設定を保存
+            {isDirty ? '保存する' : '保存済み'}
           </button>
         </div>
       </section>
     </main>
   );
-}
-
-function SectionHeading({ step, title, description }) {
-  return (
-    <div className="section-heading">
-      <span>{step}</span>
-      <div>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </div>
-    </div>
-  );
-}
-
-function ToggleCard({ enabled, title, description, onToggle }) {
-  return (
-    <button
-      type="button"
-      className={enabled ? 'toggle-card active' : 'toggle-card'}
-      onClick={onToggle}
-      aria-pressed={enabled}
-    >
-      <div className="toggle-copy">
-        <strong>{title}</strong>
-        <small>{description}</small>
-      </div>
-      <span className="toggle-meta">
-        <span className="toggle-state">{enabled ? 'ON' : 'OFF'}</span>
-        <span className="toggle-switch" aria-hidden="true">
-          <span />
-        </span>
-      </span>
-    </button>
-  );
-}
-
-function ShortcutRecorder({ title, value, active, onStart }) {
-  return (
-    <div
-      className={active ? 'shortcut-recorder recording' : 'shortcut-recorder'}
-    >
-      <div>
-        <span>{title}</span>
-        <strong>{active ? 'キー入力待ち...' : shortcutToLabel(value)}</strong>
-      </div>
-      <button type="button" onClick={onStart}>
-        {active ? 'Escでキャンセル' : '録画する'}
-      </button>
-    </div>
-  );
-}
-
-function TabColorField({ label, value, onChange }) {
-  return (
-    <label className="tab-color-field">
-      <span className="tab-color-copy">
-        <strong>{label}</strong>
-        <small>この種類のタブに使う色</small>
-      </span>
-      <span className="tab-color-control">
-        <span
-          className="tab-color-preview"
-          style={{ '--tab-color-preview': value }}
-          aria-hidden="true"
-        >
-          <span className="tab-color-dot" />
-          <span className="tab-color-pill" />
-        </span>
-        <input
-          type="color"
-          className="tab-color-input"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          aria-label={`${label}の色`}
-        />
-        <code>{value.toUpperCase()}</code>
-      </span>
-    </label>
-  );
-}
-
-function getBackgroundPreviewHost(value) {
-  if (!value) return '';
-
-  try {
-    return new URL(value).host;
-  } catch {
-    return 'URL形式を確認してください';
-  }
 }
