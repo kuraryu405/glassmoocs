@@ -293,6 +293,9 @@
     async function runPanelAction(panel, action) {
       const statusNode = panel.querySelector('.glassmoocs-download-status');
       setPanelBusy(panel, true);
+      if (statusNode) {
+        statusNode.textContent = '資料保存を開始しています...';
+      }
 
       try {
         await action();
@@ -341,15 +344,6 @@
       <p class="glassmoocs-download-status"></p>
     `;
 
-      const collectButton = panel.querySelector(
-        '[data-glassmoocs-download-action="course"]',
-      );
-      const lectureButton = panel.querySelector(
-        '[data-glassmoocs-download-action="lecture"]',
-      );
-      const pageButton = panel.querySelector(
-        '[data-glassmoocs-download-action="page"]',
-      );
       const permissionButton = panel.querySelector(
         '[data-glassmoocs-download-action="grant-slides-capture"]',
       );
@@ -357,28 +351,51 @@
         '.glassmoocs-download-permission-status',
       );
 
-      collectButton?.addEventListener('click', () => {
-        runPanelAction(panel, handleCourseCollectionRequest);
-      });
+      panel.addEventListener(
+        'click',
+        (event) => {
+          const button = event.target?.closest?.(
+            '[data-glassmoocs-download-action]',
+          );
+          if (!(button instanceof HTMLButtonElement)) return;
+          if (!panel.contains(button)) return;
+          if (button.disabled) return;
 
-      lectureButton?.addEventListener('click', () => {
-        runPanelAction(panel, handleLectureDownloadRequest);
-      });
+          const action = button.dataset.glassmoocsDownloadAction;
+          if (
+            action !== 'course' &&
+            action !== 'lecture' &&
+            action !== 'page'
+          ) {
+            return;
+          }
 
-      pageButton?.addEventListener('click', () => {
-        runPanelAction(panel, handleCurrentPageDownloadRequest);
-      });
+          event.preventDefault();
+          event.stopPropagation();
 
-      permissionButton?.addEventListener('click', async () => {
+          const handler =
+            action === 'course'
+              ? handleCourseCollectionRequest
+              : action === 'lecture'
+                ? handleLectureDownloadRequest
+                : handleCurrentPageDownloadRequest;
+          runPanelAction(panel, handler);
+        },
+        true,
+      );
+
+      permissionButton?.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         if (!(permissionStatusNode instanceof HTMLElement)) return;
         permissionButton.disabled = true;
         permissionStatusNode.textContent =
-          '許可ウィンドウを開いています。通常はこのあと自動で許可ダイアログが出ます...';
+          '拡張機能の popup を開いて、Slides キャプチャ権限を許可してください。';
 
         try {
           await openSlidesCapturePermissionWindow();
           permissionStatusNode.textContent =
-            '許可ウィンドウを開きました。ダイアログが出ない場合だけ、その中の再試行ボタンを押してください。';
+            '許可ウィンドウを開きました。Chromium で反応しない場合は、ツールバーの拡張機能 popup から許可してください。';
         } catch (error) {
           permissionStatusNode.textContent = normalizeText(
             error?.message,

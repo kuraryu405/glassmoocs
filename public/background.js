@@ -947,6 +947,10 @@
     return !isFirefoxLike();
   }
 
+  function shouldActivateSlidesExportTab() {
+    return shouldRasterizeSlidesInTab();
+  }
+
   function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value, fallback);
     let replaced = normalized
@@ -1332,7 +1336,7 @@
       try {
         const reusedTab = await tabsUpdate(existingTabId, {
           url: viewerUrl,
-          active: false,
+          active: shouldActivateSlidesExportTab(),
         });
         rememberActiveSlidesTab(reusedTab?.id);
         return await waitForTabLoad(reusedTab.id, viewerUrl, cancelToken);
@@ -1341,7 +1345,10 @@
       }
     }
 
-    const slidesTab = await tabsCreate({ url: viewerUrl, active: false });
+    const slidesTab = await tabsCreate({
+      url: viewerUrl,
+      active: shouldActivateSlidesExportTab(),
+    });
     rememberActiveSlidesTab(slidesTab?.id);
     return await waitForTabLoad(slidesTab.id, viewerUrl, cancelToken);
   }
@@ -1659,6 +1666,10 @@
   }
 
   async function assertSlidesTabStillInBackground(tabId) {
+    if (shouldActivateSlidesExportTab()) {
+      return;
+    }
+
     let tab = null;
     try {
       tab = await tabsGet(tabId);
