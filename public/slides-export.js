@@ -19,6 +19,7 @@
     goToFirstSlide: 'glassmoocs:go-to-first-slide',
     goToSlide: 'glassmoocs:go-to-slide',
     serializeCurrentSlideSvg: 'glassmoocs:serialize-current-slide-svg',
+    rasterizeCurrentSlideJpeg: 'glassmoocs:rasterize-current-slide-jpeg',
   };
   const INLINE_IMAGE_CONCURRENCY = 6;
   const FRESH_SLIDE_SETTLE_MS = 120;
@@ -351,7 +352,7 @@
     };
   }
 
-  const { serializeCurrentSlideSvg } =
+  const { rasterizeCurrentSlideJpeg, serializeCurrentSlideSvg } =
     globalThis.__glassmoocsCreateSlidesSvgExportUtils({
       INLINE_IMAGE_CONCURRENCY,
       MESSAGE_TYPES,
@@ -799,6 +800,46 @@
                 error: normalizeText(
                   error?.message,
                   `${page} ページ SVG の直列化に失敗しました。`,
+                ),
+              })
+            ),
+          );
+        return true;
+      }
+
+      if (type === MESSAGE_TYPES.rasterizeCurrentSlideJpeg) {
+        const page = Number(message?.page);
+        rasterizeCurrentSlideJpeg(page, {
+          quality: Number(message?.quality),
+          scale: Number(message?.scale),
+          minWidth: Number(message?.minWidth),
+          minHeight: Number(message?.minHeight),
+        })
+          .then((result) =>
+            sendResponse({
+              ok: true,
+              dataUrl: result.dataUrl,
+              width: result.width,
+              height: result.height,
+            }),
+          )
+          .catch(
+            (error) => (
+              postAgentLog(
+                'slides-export.js:onMessage',
+                'rasterizeCurrentSlideJpeg failed',
+                {
+                  page,
+                  error: summarizeError(error),
+                  currentPage: getCurrentPage(),
+                },
+                AGENT_LOG_HYPOTHESES.svg,
+              ),
+              sendResponse({
+                ok: false,
+                error: normalizeText(
+                  error?.message,
+                  `${page} ページ JPEG の生成に失敗しました。`,
                 ),
               })
             ),
