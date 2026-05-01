@@ -185,18 +185,15 @@
         }
 
         if (collectButton instanceof HTMLButtonElement) {
-          collectButton.disabled = busy || !pageContext?.courseUrl;
+          collectButton.disabled = busy;
         }
 
         if (lectureButton instanceof HTMLButtonElement) {
-          lectureButton.disabled = busy || !pageContext?.lectureUrl;
+          lectureButton.disabled = busy;
         }
 
         if (pageButton instanceof HTMLButtonElement) {
-          pageButton.disabled =
-            busy ||
-            !pageContext?.assetCandidates ||
-            pageContext.assetCandidates.length === 0;
+          pageButton.disabled = busy;
         }
       });
     }
@@ -354,9 +351,13 @@
       panel.addEventListener(
         'click',
         (event) => {
-          const button = event.target?.closest?.(
-            '[data-glassmoocs-download-action]',
-          );
+          const button = event
+            .composedPath()
+            .find(
+              (node) =>
+                node instanceof HTMLButtonElement &&
+                node.matches('[data-glassmoocs-download-action]'),
+            );
           if (!(button instanceof HTMLButtonElement)) return;
           if (!panel.contains(button)) return;
           if (button.disabled) return;
