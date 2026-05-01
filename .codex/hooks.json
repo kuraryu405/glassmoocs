@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=\"$(git rev-parse --show-toplevel 2>/dev/null || pwd)\"; python3 \"$root/.codex/hooks/route_agent_docs.py\"",
+            "timeout": 5,
+            "statusMessage": "routing agent docs"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+# Project-local Codex settings.
+#
+# Hooks are used only to route the agent toward the relevant docs/agent/*.md
+# files for the current prompt. They do not change repository implementation
+# code or gate normal execution.
+
+[features]
+codex_hooks = true
