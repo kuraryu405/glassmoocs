@@ -44,6 +44,7 @@
     goToFirstSlide: 'glassmoocs:go-to-first-slide',
     goToSlide: 'glassmoocs:go-to-slide',
     serializeCurrentSlideSvg: 'glassmoocs:serialize-current-slide-svg',
+    rasterizeCurrentSlideJpeg: 'glassmoocs:rasterize-current-slide-jpeg',
   };
   const STATUS = {
     idle: 'idle',
@@ -942,6 +943,10 @@
     return /firefox/i.test(userAgent);
   }
 
+  function shouldRasterizeSlidesInTab() {
+    return !isFirefoxLike();
+  }
+
   function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value, fallback);
     let replaced = normalized
@@ -1294,6 +1299,7 @@
     createCanvas,
     createPdfBuilder,
     cropCapturedSlide,
+    dataUrlToJpegPage,
   } = globalThis.__glassmoocsCreateBackgroundPdfUtils({
     CAPTURE_QUALITY,
     normalizeText,
@@ -1414,20 +1420,24 @@
   }
 
   async function downloadPdfBlob(blob, filename, cancelToken) {
-    const blobUrl = URL.createObjectURL(blob);
+    const canUseBlobUrl = typeof URL?.createObjectURL === 'function';
+    const downloadUrl = canUseBlobUrl
+      ? URL.createObjectURL(blob)
+      : await blobToDataUrl(blob);
     postAgentLog(
       'background.js:downloadPdfBlob',
       'starting pdf blob download',
       {
         filename: normalizeText(filename, 'slides.pdf'),
         blobBytes: Number(blob?.size) || 0,
+        urlKind: canUseBlobUrl ? 'blob' : 'data',
       },
       AGENT_LOG_HYPOTHESES.pdf,
     );
 
     try {
       const downloadId = await downloadFile({
-        url: blobUrl,
+        url: downloadUrl,
         filename: normalizeText(filename, 'slides.pdf'),
         conflictAction: 'overwrite',
         saveAs: false,
@@ -1447,7 +1457,9 @@
         storedFilename: normalizeText(filename, 'slides.pdf'),
       };
     } finally {
-      URL.revokeObjectURL(blobUrl);
+      if (canUseBlobUrl) {
+        URL.revokeObjectURL(downloadUrl);
+      }
     }
   }
 
@@ -1864,6 +1876,70 @@
     return response;
   }
 
+  async function requestRasterizeCurrentSlideJpeg(tabId, page, cancelToken) {
+    const startedAt = Date.now();
+    assertNotCanceled(cancelToken);
+    postAgentLog(
+      'background.js:requestRasterizeCurrentSlideJpeg',
+      'rasterizeCurrentSlideJpeg request start',
+      { tabId, page },
+      AGENT_LOG_HYPOTHESES.pdf,
+    );
+    const response = await sendTabMessageWithRetry(
+      tabId,
+      buildSlidesMessage(MESSAGE_TYPES.rasterizeCurrentSlideJpeg, {
+        page,
+        quality: CAPTURE_QUALITY,
+        scale: SVG_RENDER_SCALE,
+        minWidth: SVG_RENDER_MIN_WIDTH,
+        minHeight: SVG_RENDER_MIN_HEIGHT,
+      }),
+      { attempts: 4, intervalMs: 300, cancelToken },
+    );
+    if (
+      !response?.ok ||
+      !normalizeText(response.dataUrl) ||
+      !Number.isFinite(Number(response.width)) ||
+      !Number.isFinite(Number(response.height))
+    ) {
+      postAgentLog(
+        'background.js:requestRasterizeCurrentSlideJpeg',
+        'rasterizeCurrentSlideJpeg request failed',
+        {
+          tabId,
+          page,
+          error: normalizeText(response?.error),
+        },
+        AGENT_LOG_HYPOTHESES.pdf,
+      );
+      throw new Error(
+        normalizeText(
+          response?.error,
+          `Slides の ${page} ページ JPEG 化に失敗しました。`,
+        ),
+      );
+    }
+
+    postAgentLog(
+      'background.js:requestRasterizeCurrentSlideJpeg',
+      'rasterizeCurrentSlideJpeg request done',
+      {
+        tabId,
+        page,
+        durationMs: Date.now() - startedAt,
+        width: Number(response.width),
+        height: Number(response.height),
+        dataUrlLength: response.dataUrl.length,
+      },
+      AGENT_LOG_HYPOTHESES.pdf,
+    );
+    return await dataUrlToJpegPage(
+      response.dataUrl,
+      Number(response.width),
+      Number(response.height),
+    );
+  }
+
   async function loadBlobImageElement(blob) {
     if (
       typeof Image === 'undefined' ||
@@ -2187,8 +2263,37 @@
 
       await saveProgressState(state, {
         status: STATUS.rendering,
-        stage: `serialize-slide-svg-${page}/${session.totalPages}`,
+        stage: shouldRasterizeSlidesInTab()
+          ? `rasterize-slide-tab-${page}/${session.totalPages}`
+          : `serialize-slide-svg-${page}/${session.totalPages}`,
       });
+
+      if (shouldRasterizeSlidesInTab()) {
+        try {
+          pdfBuilder.addJpegPage(
+            await runWithSlidesTabBackgroundGuard(
+              tabId,
+              cancelToken,
+              () => requestRasterizeCurrentSlideJpeg(tabId, page, cancelToken),
+              { label: `rasterize-current-slide-jpeg-${page}` },
+            ),
+          );
+          continue;
+        } catch (error) {
+          postAgentLog(
+            'background.js:processSlidesDownloadBySvg',
+            'tab rasterization failed, falling back to background svg render',
+            {
+              tabId,
+              windowId,
+              page,
+              totalPages: session.totalPages,
+              error: summarizeError(error),
+            },
+            AGENT_LOG_HYPOTHESES.pdf,
+          );
+        }
+      }
 
       const serializedPage = await runWithSlidesTabBackgroundGuard(
         tabId,

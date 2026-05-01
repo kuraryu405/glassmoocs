@@ -291,7 +291,124 @@
       return result;
     }
 
+    async function imageFromSvgText(svgText) {
+      const blob = new Blob([svgText], {
+        type: 'image/svg+xml;charset=utf-8',
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        return await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () =>
+            reject(new Error('serialized slide image failed to load'));
+          image.src = blobUrl;
+        });
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+    }
+
+    async function canvasToJpegDataUrl(canvas, quality) {
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (value) => {
+            if (!value) {
+              reject(new Error('slide jpeg export failed'));
+              return;
+            }
+
+            resolve(value);
+          },
+          'image/jpeg',
+          quality,
+        );
+      });
+      return await readBlobAsDataUrl(blob);
+    }
+
+    async function rasterizeCurrentSlideJpeg(page, options = {}) {
+      const startedAt = Date.now();
+      const serialized = await serializeCurrentSlideSvg(page);
+      const requestedWidth = Math.max(
+        1,
+        Math.round(
+          Number(serialized.renderWidth) ||
+            Number(serialized.viewBoxWidth) ||
+            0,
+        ),
+      );
+      const requestedHeight = Math.max(
+        1,
+        Math.round(
+          Number(serialized.renderHeight) ||
+            Number(serialized.viewBoxHeight) ||
+            0,
+        ),
+      );
+      const scale =
+        Number.isFinite(options.scale) && options.scale > 0
+          ? options.scale
+          : 1.5;
+      const minWidth = Number.isFinite(options.minWidth)
+        ? Math.max(1, options.minWidth)
+        : 1024;
+      const minHeight = Number.isFinite(options.minHeight)
+        ? Math.max(1, options.minHeight)
+        : 576;
+      const targetWidth = Math.max(
+        minWidth,
+        requestedWidth ? Math.round(requestedWidth * scale) : 0,
+        Number(serialized.viewBoxWidth)
+          ? Math.round(Number(serialized.viewBoxWidth) * scale)
+          : 0,
+      );
+      const targetHeight = Math.max(
+        minHeight,
+        requestedHeight ? Math.round(requestedHeight * scale) : 0,
+        Number(serialized.viewBoxHeight)
+          ? Math.round(Number(serialized.viewBoxHeight) * scale)
+          : 0,
+      );
+      const quality =
+        Number.isFinite(options.quality) && options.quality > 0
+          ? Math.min(1, Math.max(0.1, options.quality / 100))
+          : 0.88;
+      const image = await imageFromSvgText(serialized.svgText);
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('slide jpeg canvas context unavailable');
+      }
+
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, targetWidth, targetHeight);
+      context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+      const result = {
+        dataUrl: await canvasToJpegDataUrl(canvas, quality),
+        width: targetWidth,
+        height: targetHeight,
+      };
+      postAgentLog(
+        'slides-export.js:rasterizeCurrentSlideJpeg',
+        'rasterize slide jpeg done',
+        {
+          page,
+          width: result.width,
+          height: result.height,
+          dataUrlLength: result.dataUrl.length,
+          durationMs: Date.now() - startedAt,
+        },
+        __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
+      );
+      return result;
+    }
+
     return {
+      rasterizeCurrentSlideJpeg,
       serializeCurrentSlideSvg,
     };
   }

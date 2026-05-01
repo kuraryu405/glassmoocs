@@ -26,6 +26,14 @@
       return new Uint8Array(await blob.arrayBuffer());
     }
 
+    async function dataUrlToJpegPage(dataUrl, width, height) {
+      return {
+        width,
+        height,
+        jpegBytes: await blobToUint8Array(await dataUrlToBlob(dataUrl)),
+      };
+    }
+
     async function canvasToJpegBytes(canvas) {
       if (typeof canvas.convertToBlob === 'function') {
         return await blobToUint8Array(
@@ -268,6 +276,7 @@
       createCanvas,
       createPdfBuilder,
       cropCapturedSlide,
+      dataUrlToJpegPage,
     };
   }
 
