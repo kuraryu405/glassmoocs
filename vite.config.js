@@ -2,6 +2,8 @@ import process from 'node:process';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const buildBrowser = process.env.GLASSMOOCS_BUILD_BROWSER || 'firefox';
+
 export default defineConfig({
   define: {
     __GLASSMOOCS_ENABLE_DEBUG_LOGS__: JSON.stringify(
@@ -18,7 +20,7 @@ export default defineConfig({
   },
   plugins: [react()],
   build: {
-    outDir: 'dist',
+    outDir: `dist/${buildBrowser}`,
     emptyOutDir: true,
     rollupOptions: {
       input: {

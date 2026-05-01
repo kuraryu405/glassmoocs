@@ -7,6 +7,7 @@
 ## 1. プロジェクト概要
 
 - **対象**: `https://moocs.iniad.org/*` 向けの **Manifest V3** ブラウザ拡張（Firefox / Chrome 双方を意識した `browser` / `chrome` 併用）。
+- **ビルド成果物**: ブラウザ別に `dist/firefox/` と `dist/chromium/` を使い、各ディレクトリは `release` と `dev` のどちらか最後に実行した variant で上書きされる。
 - **主目的**: MOOCs ページの UI 改変（グラスモーフィズム等）に加え、**授業資料の収集・階層付きダウンロード**（`Downloads/glassmoocs/年度/科目/講義グループ - 講義名/ファイル`）。
 - **実行の核**: ページ改変は [`public/content.js`](public/content.js) の `MutationObserver` + `enhancePage()`。ダウンロード制御は [`public/background.js`](public/background.js)。Google Slides は [`public/slides-export.js`](public/slides-export.js) が `docs.google.com` 上で動作。
 - **設定 UI**: [`src/options/`](src/options/)（Vite + React）。ビルド成果物が `options.html` 等として配布される。
@@ -314,7 +315,7 @@ stateDiagram-v2
 2. URL 抽出関数を作る（既存は `extractAssetCandidates`）。
 3. `enhancePage()` から呼ぶ UI を差し込む。
 4. 必要なら設定 ON/OFF（content + settings.js）。
-5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `pnpm run build:amo`）。
+5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `pnpm run build:release`）。
 
 ---
 
@@ -434,9 +435,9 @@ fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
 corepack pnpm run ci
 ```
 
-`package.json` の `ci` は **`eslint . && prettier --check . && pnpm run build:amo`**。
+`package.json` の `ci` は **`eslint . && prettier --check . && pnpm run build:release`**。
 
-AMO 提出用の `pnpm run build:amo` は構造化デバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を `dist/` から除去する。開発中にログが必要な場合だけ `pnpm run build:dev` を使う。
+ビルドは `pnpm run build:firefox` / `pnpm run build:chromium` を基本とし、出力先はそれぞれ `dist/firefox/` / `dist/chromium/`。`pnpm run build:amo` は Firefox 公開向けの互換エイリアス。release ビルドは構造化デバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を対応する `dist/<browser>/` から除去する。開発中にログが必要な場合だけ `pnpm run build:firefox:dev` または `pnpm run build:chromium:dev` を使う。
 
 ---
 
