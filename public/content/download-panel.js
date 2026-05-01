@@ -20,6 +20,126 @@
     } = deps;
 
     let downloadRefreshTimer = 0;
+    let debugClickProbeInstalled = false;
+
+    function getElementSummary(node) {
+      if (!(node instanceof Element)) {
+        return {
+          nodeType: node?.nodeType || 0,
+          tagName: '',
+          id: '',
+          className: '',
+          action: '',
+          disabled: false,
+        };
+      }
+
+      return {
+        nodeType: node.nodeType,
+        tagName: normalizeText(node.tagName).toLowerCase(),
+        id: normalizeText(node.id),
+        className: normalizeText(
+          typeof node.className === 'string' ? node.className : '',
+        ),
+        action: normalizeText(
+          node.getAttribute('data-glassmoocs-download-action'),
+        ),
+        disabled: node instanceof HTMLButtonElement ? node.disabled : false,
+      };
+    }
+
+    function getPanelDebugSnapshot(panel = null) {
+      const panels = [
+        ...document.querySelectorAll('.glassmoocs-download-panel'),
+      ];
+      const targetPanel = panel || panels[0] || null;
+      const buttons = targetPanel
+        ? [
+            ...targetPanel.querySelectorAll(
+              '[data-glassmoocs-download-action]',
+            ),
+          ].map((button) => getElementSummary(button))
+        : [];
+
+      return {
+        href: window.location.href,
+        panelCount: panels.length,
+        targetPanelConnected: !!targetPanel?.isConnected,
+        targetPanelBusy: normalizeText(
+          targetPanel?.dataset?.glassmoocsDownloadBusy,
+        ),
+        buttons,
+      };
+    }
+
+    function debugPanelLog(message, data = {}) {
+      if (!__GLASSMOOCS_ENABLE_DEBUG_LOGS__) {
+        return;
+      }
+
+      const payload =
+        data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+      const logData = {
+        ...payload,
+        debugLogContext:
+          payload.debugLogContext || createDebugLogContext('page-panel-click'),
+      };
+      postAgentLog(
+        'content/download-panel.js',
+        message,
+        logData,
+        AGENT_LOG_HYPOTHESES.page || AGENT_LOG_HYPOTHESES.queue || '',
+      );
+      console.debug('[glassmoocs:download-panel]', message, logData);
+    }
+
+    function installDebugClickProbe() {
+      if (!__GLASSMOOCS_ENABLE_DEBUG_LOGS__ || debugClickProbeInstalled) {
+        return;
+      }
+
+      debugClickProbeInstalled = true;
+      document.addEventListener(
+        'click',
+        (event) => {
+          const path = event.composedPath();
+          const panel = path.find(
+            (node) =>
+              node instanceof HTMLElement &&
+              node.classList.contains('glassmoocs-download-panel'),
+          );
+          const actionNode = path.find(
+            (node) =>
+              node instanceof HTMLElement &&
+              node.hasAttribute('data-glassmoocs-download-action'),
+          );
+          const elementAtPoint =
+            Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+              ? document.elementFromPoint(event.clientX, event.clientY)
+              : null;
+          const pointPanel = elementAtPoint?.closest?.(
+            '.glassmoocs-download-panel',
+          );
+
+          if (!panel && !pointPanel && !actionNode) {
+            return;
+          }
+
+          debugPanelLog('document click probe observed download panel click', {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            eventPhase: event.eventPhase,
+            defaultPrevented: event.defaultPrevented,
+            cancelBubble: event.cancelBubble,
+            target: getElementSummary(event.target),
+            actionNode: getElementSummary(actionNode),
+            elementAtPoint: getElementSummary(elementAtPoint),
+            snapshot: getPanelDebugSnapshot(panel || pointPanel),
+          });
+        },
+        true,
+      );
+    }
 
     function getDownloadPanelAnchor() {
       const pageNavigation = document.querySelector(
@@ -58,22 +178,40 @@
       const anchor = anchorTarget?.node;
       const placement = anchorTarget?.placement || 'prepend';
 
+      debugPanelLog('mounting download panel', {
+        placement,
+        anchor: getElementSummary(anchor),
+        before: getPanelDebugSnapshot(panel),
+      });
+
       if (!anchor || (placement !== 'prepend' && !anchor.parentElement)) {
         document.body.prepend(panel);
+        debugPanelLog('download panel mounted on body', {
+          after: getPanelDebugSnapshot(panel),
+        });
         return;
       }
 
       if (placement === 'beforebegin') {
         anchor.insertAdjacentElement('beforebegin', panel);
+        debugPanelLog('download panel mounted before anchor', {
+          after: getPanelDebugSnapshot(panel),
+        });
         return;
       }
 
       if (placement === 'afterend') {
         anchor.insertAdjacentElement('afterend', panel);
+        debugPanelLog('download panel mounted after anchor', {
+          after: getPanelDebugSnapshot(panel),
+        });
         return;
       }
 
       anchor.prepend(panel);
+      debugPanelLog('download panel mounted inside anchor', {
+        after: getPanelDebugSnapshot(panel),
+      });
     }
 
     async function refreshDownloadPanels() {
@@ -96,6 +234,20 @@
         state.status === DOWNLOAD_STATUS.downloading ||
         state.status === DOWNLOAD_STATUS.rendering ||
         state.status === DOWNLOAD_STATUS.printing;
+
+      debugPanelLog('refreshing download panels', {
+        stateStatus: normalizeText(state.status),
+        busy,
+        pageContext: {
+          courseUrl: normalizeText(pageContext?.courseUrl),
+          lectureUrl: normalizeText(pageContext?.lectureUrl),
+          assetCount: Array.isArray(pageContext?.assetCandidates)
+            ? pageContext.assetCandidates.length
+            : -1,
+          pageTitle: normalizeText(pageContext?.pageTitle),
+        },
+        panelCount: panels.length,
+      });
 
       panels.forEach((panel) => {
         const contextNode = panel.querySelector('.glassmoocs-download-context');
@@ -195,11 +347,22 @@
         if (pageButton instanceof HTMLButtonElement) {
           pageButton.disabled = busy;
         }
+
+        debugPanelLog('download panel refreshed', {
+          snapshot: getPanelDebugSnapshot(panel),
+          stateStatus: normalizeText(state.status),
+          busy,
+        });
       });
     }
 
     function scheduleDownloadPanelRefresh() {
-      if (downloadRefreshTimer) return;
+      if (downloadRefreshTimer) {
+        debugPanelLog('download panel refresh already scheduled');
+        return;
+      }
+
+      debugPanelLog('scheduling download panel refresh');
 
       downloadRefreshTimer = window.setTimeout(() => {
         downloadRefreshTimer = 0;
@@ -209,7 +372,13 @@
 
     async function handleCourseCollectionRequest() {
       const debugLogContext = createDebugLogContext('course-collection');
+      debugPanelLog('course collection action start', { debugLogContext });
       const result = await collectCourseAssetsFromCurrentPage();
+      debugPanelLog('course collection assets collected', {
+        debugLogContext,
+        courseName: normalizeText(result.courseName),
+        assetCount: Array.isArray(result.assets) ? result.assets.length : -1,
+      });
       await requestBackgroundDownload(
         {
           courseName: result.courseName,
@@ -269,7 +438,13 @@
 
     async function handleLectureDownloadRequest() {
       const debugLogContext = createDebugLogContext('lecture-download');
+      debugPanelLog('lecture download action start', { debugLogContext });
       const payload = await collectLectureAssetsFromCurrentPage();
+      debugPanelLog('lecture download assets collected', {
+        debugLogContext,
+        courseName: normalizeText(payload.courseName),
+        assetCount: Array.isArray(payload.assets) ? payload.assets.length : -1,
+      });
       await requestBackgroundDownload(
         {
           courseName: payload.courseName,
@@ -289,6 +464,9 @@
 
     async function runPanelAction(panel, action) {
       const statusNode = panel.querySelector('.glassmoocs-download-status');
+      debugPanelLog('panel action run requested', {
+        snapshot: getPanelDebugSnapshot(panel),
+      });
       setPanelBusy(panel, true);
       if (statusNode) {
         statusNode.textContent = '資料保存を開始しています...';
@@ -296,7 +474,22 @@
 
       try {
         await action();
+        debugPanelLog('panel action completed', {
+          snapshot: getPanelDebugSnapshot(panel),
+        });
       } catch (error) {
+        debugPanelLog('panel action failed', {
+          error: {
+            name: normalizeText(error?.name),
+            message: normalizeText(error?.message),
+            stack: normalizeText(
+              typeof error?.stack === 'string'
+                ? error.stack.split('\n')[0]
+                : '',
+            ),
+          },
+          snapshot: getPanelDebugSnapshot(panel),
+        });
         if (statusNode) {
           statusNode.textContent = normalizeText(
             error?.message,
@@ -310,6 +503,7 @@
     }
 
     function createDownloadPanel() {
+      installDebugClickProbe();
       const panel = document.createElement('section');
       panel.className = 'glassmoocs-download-panel';
       panel.dataset.glassmoocsDownloadPanel = 'true';
@@ -351,6 +545,12 @@
       panel.addEventListener(
         'click',
         (event) => {
+          debugPanelLog('panel click listener entered', {
+            target: getElementSummary(event.target),
+            currentTarget: getElementSummary(event.currentTarget),
+            defaultPrevented: event.defaultPrevented,
+            snapshot: getPanelDebugSnapshot(panel),
+          });
           const button = event
             .composedPath()
             .find(
@@ -358,9 +558,26 @@
                 node instanceof HTMLButtonElement &&
                 node.matches('[data-glassmoocs-download-action]'),
             );
-          if (!(button instanceof HTMLButtonElement)) return;
-          if (!panel.contains(button)) return;
-          if (button.disabled) return;
+          if (!(button instanceof HTMLButtonElement)) {
+            debugPanelLog('panel click ignored: no action button in path', {
+              snapshot: getPanelDebugSnapshot(panel),
+            });
+            return;
+          }
+          if (!panel.contains(button)) {
+            debugPanelLog('panel click ignored: button outside panel', {
+              button: getElementSummary(button),
+              snapshot: getPanelDebugSnapshot(panel),
+            });
+            return;
+          }
+          if (button.disabled) {
+            debugPanelLog('panel click ignored: button disabled', {
+              button: getElementSummary(button),
+              snapshot: getPanelDebugSnapshot(panel),
+            });
+            return;
+          }
 
           const action = button.dataset.glassmoocsDownloadAction;
           if (
@@ -368,11 +585,20 @@
             action !== 'lecture' &&
             action !== 'page'
           ) {
+            debugPanelLog('panel click ignored: unsupported action', {
+              action: normalizeText(action),
+              button: getElementSummary(button),
+            });
             return;
           }
 
           event.preventDefault();
           event.stopPropagation();
+          debugPanelLog('panel click dispatching action', {
+            action: normalizeText(action),
+            button: getElementSummary(button),
+            snapshot: getPanelDebugSnapshot(panel),
+          });
 
           const handler =
             action === 'course'
@@ -386,6 +612,9 @@
       );
 
       permissionButton?.addEventListener('click', async (event) => {
+        debugPanelLog('permission button click listener entered', {
+          snapshot: getPanelDebugSnapshot(panel),
+        });
         event.preventDefault();
         event.stopPropagation();
         if (!(permissionStatusNode instanceof HTMLElement)) return;
@@ -413,6 +642,19 @@
     function injectDownloadControls() {
       const pageContext = getCurrentPageContext(document, window.location.href);
       let panel = document.querySelector('.glassmoocs-download-panel');
+
+      debugPanelLog('injectDownloadControls called', {
+        hasPageContext: !!pageContext,
+        existingPanel: !!panel,
+        pageContext: {
+          courseUrl: normalizeText(pageContext?.courseUrl),
+          lectureUrl: normalizeText(pageContext?.lectureUrl),
+          assetCount: Array.isArray(pageContext?.assetCandidates)
+            ? pageContext.assetCandidates.length
+            : -1,
+          pageTitle: normalizeText(pageContext?.pageTitle),
+        },
+      });
 
       if (!pageContext) {
         postAgentLog(
