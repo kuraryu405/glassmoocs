@@ -1090,6 +1090,7 @@
   function extractLectureName(root, urlInfo) {
     const breadcrumbs = getNonHomeBreadcrumbs(root);
     const offset = breadcrumbs[0] === urlInfo?.year ? 1 : 0;
+    const lectureBreadcrumb = normalizeText(breadcrumbs[offset + 2]);
     const activeSidebar = normalizeText(
       root.querySelector('ul.sidebar-menu li.active a')?.textContent ||
         root.querySelector('ul.treeview-menu li.active a')?.textContent,
@@ -1097,6 +1098,7 @@
     const heading = getHeadingText(root);
 
     return (
+      (urlInfo?.pageType === 'page' ? lectureBreadcrumb : '') ||
       breadcrumbs[offset + 1] ||
       activeSidebar ||
       (urlInfo?.pageType === 'lecture' ? heading : '') ||

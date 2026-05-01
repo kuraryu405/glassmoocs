@@ -1262,28 +1262,30 @@
     }
   }
 
-  function buildLectureDirectory(entry) {
+  function buildLectureDirectories(entry) {
     const safeLectureGroup = sanitizePathSegment(entry.lectureGroup, '');
     const safeLectureName = sanitizePathSegment(entry.lectureName, 'lecture');
 
     if (!safeLectureGroup) {
-      return safeLectureName;
+      return [safeLectureName];
     }
 
-    return `${safeLectureGroup} - ${safeLectureName}`;
+    return [safeLectureGroup, safeLectureName];
   }
 
   function buildDownloadFilename(courseName, entry) {
     const safeYear = sanitizePathSegment(entry.year, '');
     const safeCourseName = sanitizePathSegment(courseName, 'course');
-    const safeLectureName = buildLectureDirectory(entry);
+    const lectureDirectories = buildLectureDirectories(entry);
     const safeFileName = sanitizePathSegment(entry.filename, 'asset');
+    const pathSegments = ['glassmoocs'];
 
     if (safeYear) {
-      return `glassmoocs/${safeYear}/${safeCourseName}/${safeLectureName}/${safeFileName}`;
+      pathSegments.push(safeYear);
     }
 
-    return `glassmoocs/${safeCourseName}/${safeLectureName}/${safeFileName}`;
+    pathSegments.push(safeCourseName, ...lectureDirectories, safeFileName);
+    return pathSegments.join('/');
   }
 
   const {
