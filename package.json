@@ -9,14 +9,19 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "node scripts/build-extension.mjs",
-    "build:amo": "node scripts/build-extension.mjs",
-    "build:dev": "node scripts/build-extension.mjs --dev",
+    "build": "pnpm run build:release",
+    "build:release": "pnpm run build:firefox && pnpm run build:chromium",
+    "build:dev": "pnpm run build:firefox:dev && pnpm run build:chromium:dev",
+    "build:firefox": "node scripts/build-extension.mjs --browser firefox",
+    "build:firefox:dev": "node scripts/build-extension.mjs --browser firefox --dev",
+    "build:chromium": "node scripts/build-extension.mjs --browser chromium",
+    "build:chromium:dev": "node scripts/build-extension.mjs --browser chromium --dev",
+    "build:amo": "pnpm run build:firefox",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "ci": "eslint . && prettier --check . && pnpm run build:amo",
+    "ci": "eslint . && prettier --check . && pnpm run build:release",
     "package:source": "./scripts/create-amo-source-zip.sh"
   },
   "dependencies": {

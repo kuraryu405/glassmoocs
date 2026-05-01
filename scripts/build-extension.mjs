@@ -4,8 +4,17 @@ import { resolve } from 'node:path';
 import { transformWithEsbuild } from 'vite';
 
 const ROOT_DIR = resolve(import.meta.dirname, '..');
+const SUPPORTED_BROWSERS = new Set(['firefox', 'chromium']);
+const rawBrowser = readFlagValue('--browser') || 'firefox';
+if (!SUPPORTED_BROWSERS.has(rawBrowser)) {
+  throw new Error(
+    `Unsupported browser "${rawBrowser}". Expected one of: ${Array.from(SUPPORTED_BROWSERS).join(', ')}`,
+  );
+}
+const browser = rawBrowser;
 const mode = process.argv.includes('--dev') ? 'development' : 'production';
 const debugLogsEnabled = mode !== 'production';
+const DIST_DIR = resolve(ROOT_DIR, 'dist', browser);
 
 const SCRIPT_FILES = [
   'background.js',
@@ -16,6 +25,15 @@ const SCRIPT_FILES = [
   'slides-export.js',
   'slides-export/svg-export.js',
 ];
+
+function readFlagValue(flagName) {
+  const flagIndex = process.argv.indexOf(flagName);
+  if (flagIndex === -1) {
+    return '';
+  }
+
+  return process.argv[flagIndex + 1] || '';
+}
 
 function run(command, args, env = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -55,6 +73,16 @@ function stripDebugOnlyHtml(html) {
   );
 }
 
+async function patchManifest() {
+  const manifestPath = resolve(DIST_DIR, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  if (browser === 'chromium') {
+    delete manifest.browser_specific_settings;
+  }
+
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 function replaceDebugStringMacros(source) {
   return source.replace(
     /__GLASSMOOCS_DEBUG_STRING__\(\s*(['"])([^'"\n]*)\1\s*,?\s*\)/g,
@@ -64,7 +92,7 @@ function replaceDebugStringMacros(source) {
 }
 
 async function transformScript(relativePath) {
-  const filePath = resolve(ROOT_DIR, 'dist', relativePath);
+  const filePath = resolve(DIST_DIR, relativePath);
   const source = replaceDebugStringMacros(await readFile(filePath, 'utf8'));
   const result = await transformWithEsbuild(source, filePath, {
     define: {
@@ -79,16 +107,17 @@ async function transformScript(relativePath) {
 }
 
 async function postprocessDist() {
+  await patchManifest();
   await Promise.all(SCRIPT_FILES.map(transformScript));
   await sanitizeGeneratedAssetScripts();
 
-  const popupPath = resolve(ROOT_DIR, 'dist', 'popup.html');
+  const popupPath = resolve(DIST_DIR, 'popup.html');
   const popupHtml = await readFile(popupPath, 'utf8');
   await writeFile(popupPath, stripDebugOnlyHtml(popupHtml));
 }
 
 async function sanitizeGeneratedAssetScripts() {
-  const assetsDir = resolve(ROOT_DIR, 'dist', 'assets');
+  const assetsDir = resolve(DIST_DIR, 'assets');
   const files = await readdir(assetsDir).catch(() => []);
   await Promise.all(
     files
@@ -105,6 +134,7 @@ async function sanitizeGeneratedAssetScripts() {
 }
 
 await run('pnpm', ['exec', 'vite', 'build', '--mode', mode], {
+  GLASSMOOCS_BUILD_BROWSER: browser,
   GLASSMOOCS_DEBUG_LOGS: debugLogsEnabled ? 'true' : 'false',
 });
 await postprocessDist();
