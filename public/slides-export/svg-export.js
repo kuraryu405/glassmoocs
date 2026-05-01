@@ -108,7 +108,7 @@
           page: pageIndex,
           imageNodeCount: imageNodes.length,
         },
-        'H-SVG-B',
+        __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
       );
 
       await mapWithConcurrency(
@@ -164,7 +164,7 @@
                   name: normalizeText(directError?.name),
                 },
               },
-              'H-SVG-B',
+              __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
             );
             try {
               const dataUrl = await fetchImageViaBackground(url);
@@ -192,7 +192,7 @@
                     name: normalizeText(backgroundError?.name),
                   },
                 },
-                'H-SVG-B',
+                __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
               );
               console.warn(
                 '[glassmoocs] slide image inline failed',
@@ -216,7 +216,7 @@
           failedCount,
           durationMs: Date.now() - startedAt,
         },
-        'H-SVG-B',
+        __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
       );
     }
 
@@ -229,7 +229,7 @@
           page,
           currentPage: getCurrentPage(),
         },
-        'H-SVG-A',
+        __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
       );
       const svg = getSlideSvg();
       if (!svg) {
@@ -240,7 +240,7 @@
             page,
             currentPage: getCurrentPage(),
           },
-          'H-SVG-A',
+          __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
         );
         throw new Error(`${page} ページの SVG を取得できませんでした。`);
       }
@@ -252,7 +252,7 @@
             page,
             currentPage: getCurrentPage(),
           },
-          'H-SVG-A',
+          __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
         );
         throw new Error(`${page} ページが表示されていません。`);
       }
@@ -286,7 +286,7 @@
           renderHeight: result.renderHeight,
           durationMs: Date.now() - startedAt,
         },
-        'H-SVG-A',
+        __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
       );
       return result;
     }

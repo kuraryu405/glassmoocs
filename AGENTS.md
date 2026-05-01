@@ -278,6 +278,8 @@ stateDiagram-v2
 - 大きい作業は、レビュー可能なサイズの **土台 PR → 本体 PR → cleanup PR** に分割してよい。
 - ただし、分割しすぎて**単体では意味を持たない PR**は避ける。
 - 未コミット差分をまとめて扱うときも、そのまま 1 つにせず、まず「何の変更か」で棚卸ししてから分割する。
+- **1 回の依頼で着手した編集は、区切りがついた時点でこまめにコミットする。** 次の依頼に入る前に、少なくとも「戻せる場所」が `git` に残っている状態を原則とする。
+- AI エージェントが編集する場合も同様に、**未コミット差分を溜めたまま別件へ移らない。** 例外が必要なら、その理由を `HANDOFF.md` か作業メモに明記する。
 
 ### 9.2 DO / DON'T（事故防止）
 
@@ -312,7 +314,7 @@ stateDiagram-v2
 2. URL 抽出関数を作る（既存は `extractAssetCandidates`）。
 3. `enhancePage()` から呼ぶ UI を差し込む。
 4. 必要なら設定 ON/OFF（content + settings.js）。
-5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `vite build`）。
+5. **`corepack pnpm run ci`**（`eslint` + `prettier --check` + `pnpm run build:amo`）。
 
 ---
 
@@ -432,7 +434,9 @@ fetch('http://127.0.0.1:7443/ingest/<セッションID>', {
 corepack pnpm run ci
 ```
 
-`package.json` の `ci` は **`eslint . && prettier --check . && vite build`**。
+`package.json` の `ci` は **`eslint . && prettier --check . && pnpm run build:amo`**。
+
+AMO 提出用の `pnpm run build:amo` は構造化デバッグログ UI・localhost 送信先・ログ用 storage/message 文字列を `dist/` から除去する。開発中にログが必要な場合だけ `pnpm run build:dev` を使う。
 
 ---
 

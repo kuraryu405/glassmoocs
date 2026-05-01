@@ -1,6 +1,6 @@
 {
   "name": "glassmoocs",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.30.2",
@@ -9,15 +9,18 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
+    "build": "node scripts/build-extension.mjs",
+    "build:amo": "node scripts/build-extension.mjs",
+    "build:dev": "node scripts/build-extension.mjs --dev",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "ci": "eslint . && prettier --check . && vite build",
+    "ci": "eslint . && prettier --check . && pnpm run build:amo",
     "package:source": "./scripts/create-amo-source-zip.sh"
   },
   "dependencies": {
+    "preact": "^10.29.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },

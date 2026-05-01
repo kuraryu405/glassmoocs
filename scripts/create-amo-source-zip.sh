@@ -30,6 +30,7 @@ copy_path prettier.config.mjs
 copy_path options.html
 copy_path README.md
 copy_path public
+copy_path scripts
 copy_path src
 
 rm -f "$OUTPUT_PATH"

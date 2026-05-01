@@ -1,4 +1,4 @@
-import { shortcutToLabel } from './settings.js';
+import { DEBUG_LOGS_ENABLED, shortcutToLabel } from './settings.js';
 import {
   BACKGROUND_SHORTCUT_LABEL,
   LOCKED_TAB_MODE_COPY,
@@ -72,7 +72,7 @@ export default function App() {
             <span>ショートカット</span>
             <span>提出後の動作</span>
             <span>背景</span>
-            <span>ログ</span>
+            {DEBUG_LOGS_ENABLED ? <span>ログ</span> : null}
           </div>
         </div>
 
@@ -316,32 +316,34 @@ export default function App() {
             </div>
           </article>
 
-          <article id="debug-log" className="panel">
-            <SectionHeading
-              eyebrow="診断"
-              title="デバッグログ"
-              description="ダウンロード不具合の調査用です。通常は OFF のままにします。"
-            />
-
-            <div className="panel-stack">
-              <ToggleCard
-                enabled={settings.debugLoggingEnabled}
-                title="構造化デバッグログを有効にする"
-                description="content / background / Slides exporter の主要イベントを 127.0.0.1:7443 に送ります。"
-                onToggle={() =>
-                  setDebugLoggingEnabled(!settings.debugLoggingEnabled)
-                }
+          {DEBUG_LOGS_ENABLED ? (
+            <article id="debug-log" className="panel">
+              <SectionHeading
+                eyebrow="診断"
+                title="デバッグログ"
+                description="ダウンロード不具合の調査用です。通常は OFF のままにします。"
               />
 
-              <div className="support-block">
-                <p className="hint">
-                  ログ受け口を立ててから使ってください。通常動作では不要です。
-                  `glassmoocs_debug_log=1`
-                  をURLに付けると、そのページだけ一時的に有効化することもできます。
-                </p>
+              <div className="panel-stack">
+                <ToggleCard
+                  enabled={settings.debugLoggingEnabled}
+                  title="構造化デバッグログを有効にする"
+                  description="content / background / Slides exporter の主要イベントを 127.0.0.1:7443 に送ります。"
+                  onToggle={() =>
+                    setDebugLoggingEnabled(!settings.debugLoggingEnabled)
+                  }
+                />
+
+                <div className="support-block">
+                  <p className="hint">
+                    ログ受け口を立ててから使ってください。通常動作では不要です。
+                    `glassmoocs_debug_log=1`
+                    をURLに付けると、そのページだけ一時的に有効化することもできます。
+                  </p>
+                </div>
               </div>
-            </div>
-          </article>
+            </article>
+          ) : null}
         </div>
 
         <article id="background" className="panel">

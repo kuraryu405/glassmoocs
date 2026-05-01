@@ -1,5 +1,6 @@
 export const SETTINGS_STORAGE_KEY = 'glassmoocs_settings';
 export const BACKGROUND_IMAGE_STORAGE_KEY = 'glassmoocs_background_image';
+export const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
 const LEGACY_BACKGROUND_STORAGE_KEY = 'iniad_bg_image';
 export const COLOR_MODES = {
   full: 'full',
@@ -178,7 +179,7 @@ export function createDefaultSettings() {
     colorTabsEnabled: true,
     tabColors: { ...DEFAULT_TAB_COLORS },
     reloadAfterSubmit: false,
-    debugLoggingEnabled: false,
+    ...(DEBUG_LOGS_ENABLED ? { debugLoggingEnabled: false } : {}),
   };
 }
 
@@ -240,10 +241,14 @@ export function mergeSettings(rawSettings) {
       typeof raw.reloadAfterSubmit === 'boolean'
         ? raw.reloadAfterSubmit
         : defaults.reloadAfterSubmit,
-    debugLoggingEnabled:
-      typeof raw.debugLoggingEnabled === 'boolean'
-        ? raw.debugLoggingEnabled
-        : defaults.debugLoggingEnabled,
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          debugLoggingEnabled:
+            typeof raw.debugLoggingEnabled === 'boolean'
+              ? raw.debugLoggingEnabled
+              : defaults.debugLoggingEnabled,
+        }
+      : {}),
   };
 }
 
@@ -377,7 +382,7 @@ export function validateSettings(settings) {
     }
   });
 
-  if (typeof settings.debugLoggingEnabled !== 'boolean') {
+  if (DEBUG_LOGS_ENABLED && typeof settings.debugLoggingEnabled !== 'boolean') {
     errors.push('デバッグログ設定が不正です。');
   }
 

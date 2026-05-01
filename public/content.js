@@ -15,6 +15,7 @@
   const VALID_TAB_COLOR_MODES = new Set([MODE_FULL, MODE_BADGE, MODE_ICON]);
   const SUBMIT_RELOAD_WINDOW_MS = 15000;
   const SUBMIT_RELOAD_DELAY_MS = 180;
+  const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
   const DEFAULT_TAB_COLORS = {
     attendanceTest: '#f59e0b',
     attendanceAssignment: '#06b6d4',
@@ -26,7 +27,13 @@
     getDownloadState: 'glassmoocs:get-download-state',
     setDownloadState: 'glassmoocs:set-download-state',
     downloadAssets: 'glassmoocs:download-assets',
-    relayAgentLog: 'glassmoocs:relay-agent-log',
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          relayAgentLog: __GLASSMOOCS_DEBUG_STRING__(
+            'glassmoocs:relay-agent-log',
+          ),
+        }
+      : {}),
     getSlidesCapturePermission: 'glassmoocs:get-slides-capture-permission',
     openSlidesCapturePermissionWindow:
       'glassmoocs:open-slides-capture-permission-window',
@@ -71,18 +78,26 @@
   ]);
   const extensionApi = globalThis.browser || globalThis.chrome || null;
   const AGENT_LOG_RUNTIME = 'content';
-  const AGENT_LOG_ENDPOINT = 'http://127.0.0.1:7443/ingest';
-  const DEBUG_AGENT_LOG_PARAM = 'glassmoocs_debug_log';
+  const AGENT_LOG_ENDPOINT = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('http://127.0.0.1:7443/ingest')
+    : '';
+  const DEBUG_AGENT_LOG_PARAM = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log')
+    : '';
   // [H-QUEUE-A] payload construction or background queue handoff is mismatched
   // [H-PAGE-A] page context or asset extraction is incomplete on the current page
   const AGENT_LOG_SESSION_ID = `glassmoocs-cs-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-  const AGENT_LOG_HYPOTHESES = {
-    queue: 'H-QUEUE-A',
-    page: 'H-PAGE-A',
-  };
-  const DEBUG_AUTO_DOWNLOAD_PARAM = 'glassmoocs_debug_auto_download';
+  const AGENT_LOG_HYPOTHESES = DEBUG_LOGS_ENABLED
+    ? {
+        queue: __GLASSMOOCS_DEBUG_STRING__('H-QUEUE-A'),
+        page: __GLASSMOOCS_DEBUG_STRING__('H-PAGE-A'),
+      }
+    : {};
+  const DEBUG_AUTO_DOWNLOAD_PARAM = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_auto_download')
+    : '';
 
   const TAB_TYPES = {
     attendanceTest: {
@@ -246,6 +261,10 @@
   }
 
   function hasDebugLogQueryOverride(rawUrl = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return false;
+    }
+
     try {
       const params = new URL(rawUrl || window.location.href).searchParams;
       const value = normalizeText(
@@ -258,6 +277,15 @@
   }
 
   function normalizeDebugLogContext(rawContext, fallbackSessionId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return {
+        enabled: false,
+        endpoint: '',
+        sessionId: normalizeText(fallbackSessionId),
+        source: '',
+      };
+    }
+
     const context =
       rawContext && typeof rawContext === 'object' ? rawContext : {};
 
@@ -273,6 +301,10 @@
   }
 
   function createDebugLogContext(source) {
+    if (!DEBUG_LOGS_ENABLED) {
+      return normalizeDebugLogContext(null, AGENT_LOG_SESSION_ID);
+    }
+
     return normalizeDebugLogContext(
       {
         enabled: !!settings?.debugLoggingEnabled || hasDebugLogQueryOverride(),
@@ -301,6 +333,10 @@
   }
 
   function postAgentLog(location, message, data = {}, hypothesisId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     const payload =
       data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     const context = normalizeDebugLogContext(
@@ -404,7 +440,7 @@
       colorTabsEnabled: true,
       tabColors: { ...DEFAULT_TAB_COLORS },
       reloadAfterSubmit: false,
-      debugLoggingEnabled: false,
+      ...(DEBUG_LOGS_ENABLED ? { debugLoggingEnabled: false } : {}),
     };
   }
 
@@ -445,10 +481,14 @@
         typeof raw.reloadAfterSubmit === 'boolean'
           ? raw.reloadAfterSubmit
           : defaults.reloadAfterSubmit,
-      debugLoggingEnabled:
-        typeof raw.debugLoggingEnabled === 'boolean'
-          ? raw.debugLoggingEnabled
-          : defaults.debugLoggingEnabled,
+      ...(DEBUG_LOGS_ENABLED
+        ? {
+            debugLoggingEnabled:
+              typeof raw.debugLoggingEnabled === 'boolean'
+                ? raw.debugLoggingEnabled
+                : defaults.debugLoggingEnabled,
+          }
+        : {}),
     };
   }
 
@@ -1050,6 +1090,7 @@
   function extractLectureName(root, urlInfo) {
     const breadcrumbs = getNonHomeBreadcrumbs(root);
     const offset = breadcrumbs[0] === urlInfo?.year ? 1 : 0;
+    const lectureBreadcrumb = normalizeText(breadcrumbs[offset + 2]);
     const activeSidebar = normalizeText(
       root.querySelector('ul.sidebar-menu li.active a')?.textContent ||
         root.querySelector('ul.treeview-menu li.active a')?.textContent,
@@ -1057,6 +1098,7 @@
     const heading = getHeadingText(root);
 
     return (
+      (urlInfo?.pageType === 'page' ? lectureBreadcrumb : '') ||
       breadcrumbs[offset + 1] ||
       activeSidebar ||
       (urlInfo?.pageType === 'lecture' ? heading : '') ||
@@ -2087,7 +2129,7 @@
 
   const downloadPanelComponent =
     globalThis.__glassmoocsCreateDownloadPanelComponent({
-      AGENT_LOG_HYPOTHESES,
+      AGENT_LOG_HYPOTHESES: DEBUG_LOGS_ENABLED ? AGENT_LOG_HYPOTHESES : {},
       DOWNLOAD_STATUS,
       buildCurrentPageDownloadPayload,
       createDebugLogContext,
@@ -2122,6 +2164,10 @@
   }
 
   function maybeAutoTriggerDebugDownload(pageContext) {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     if (
       !new URL(window.location.href).searchParams.has(DEBUG_AUTO_DOWNLOAD_PARAM)
     ) {

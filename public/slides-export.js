@@ -4,8 +4,15 @@
   }
   globalThis.__glassmoocsExporterBooted = true;
 
+  const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
   const MESSAGE_TYPES = {
-    relayAgentLog: 'glassmoocs:relay-agent-log',
+    ...(DEBUG_LOGS_ENABLED
+      ? {
+          relayAgentLog: __GLASSMOOCS_DEBUG_STRING__(
+            'glassmoocs:relay-agent-log',
+          ),
+        }
+      : {}),
     fetchImageDataUrl: 'glassmoocs:fetch-image-data-url',
     getSlidesSessionInfo: 'glassmoocs:get-slides-session-info',
     waitForSlideReady: 'glassmoocs:wait-for-slide-ready',
@@ -17,8 +24,12 @@
   const FRESH_SLIDE_SETTLE_MS = 120;
   const POST_FRESH_SLIDE_DELAY_MS = 80;
   const AGENT_LOG_RUNTIME = 'slides-export';
-  const AGENT_LOG_ENDPOINT = 'http://127.0.0.1:7443/ingest';
-  const DEBUG_AGENT_LOG_PARAM = 'glassmoocs_debug_log';
+  const AGENT_LOG_ENDPOINT = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('http://127.0.0.1:7443/ingest')
+    : '';
+  const DEBUG_AGENT_LOG_PARAM = DEBUG_LOGS_ENABLED
+    ? __GLASSMOOCS_DEBUG_STRING__('glassmoocs_debug_log')
+    : '';
   // [H-SLIDE-A] Slides viewer 上のページ遷移/描画待機が不安定
   // [H-SVG-A] Slides タブ上で SVG の直列化自体が遅い/失敗している
   // [H-SVG-B] 画像の data URL 化で direct fetch/background fetch に時間が掛かっている
@@ -26,11 +37,13 @@
   const AGENT_LOG_SESSION_ID = `glassmoocs-se-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-  const AGENT_LOG_HYPOTHESES = {
-    slide: 'H-SLIDE-A',
-    svg: 'H-SVG-A',
-    image: 'H-SVG-B',
-  };
+  const AGENT_LOG_HYPOTHESES = DEBUG_LOGS_ENABLED
+    ? {
+        slide: __GLASSMOOCS_DEBUG_STRING__('H-SLIDE-A'),
+        svg: __GLASSMOOCS_DEBUG_STRING__('H-SVG-A'),
+        image: __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
+      }
+    : {};
   let activeDebugLogContext = null;
 
   function normalizeText(value, fallback = '') {
@@ -60,6 +73,10 @@
   }
 
   function hasDebugLogQueryOverride(rawUrl = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return false;
+    }
+
     try {
       const params = new URL(rawUrl || window.location.href).searchParams;
       const value = normalizeText(
@@ -72,6 +89,15 @@
   }
 
   function normalizeDebugLogContext(rawContext, fallbackSessionId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return {
+        enabled: false,
+        endpoint: '',
+        sessionId: normalizeText(fallbackSessionId),
+        source: '',
+      };
+    }
+
     const context =
       rawContext && typeof rawContext === 'object' ? rawContext : {};
 
@@ -87,6 +113,10 @@
   }
 
   function postAgentLog(location, message, data = {}, hypothesisId = '') {
+    if (!DEBUG_LOGS_ENABLED) {
+      return;
+    }
+
     const payload =
       data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     const context = normalizeDebugLogContext(
