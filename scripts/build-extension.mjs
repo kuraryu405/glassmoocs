@@ -21,7 +21,6 @@ const SCRIPT_FILES = [
   'background.js',
   'background/pdf.js',
   'content.js',
-  'content/assignment-reminder-boot.js',
   'content/download-panel.js',
   'page-bridge.js',
   'popup.js',

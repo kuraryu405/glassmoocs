@@ -209,17 +209,8 @@
       }
 
       if (placement === 'afterend') {
-        // assignment パネルが header 直後にいる場合はその後ろに付く。
-        // 両パネルとも header/afterend を要求するため、順序を固定しないと
-        // 毎フレーム奪い合いになる。
-        const assignmentPanel = anchor.nextElementSibling?.classList?.contains(
-          'glassmoocs-assignment-reminder-panel',
-        )
-          ? anchor.nextElementSibling
-          : null;
-        const ref = assignmentPanel || anchor;
-        if (ref.nextElementSibling !== panel) {
-          ref.insertAdjacentElement('afterend', panel);
+        if (anchor.nextElementSibling !== panel) {
+          anchor.insertAdjacentElement('afterend', panel);
         }
         debugPanelLog('download panel mounted after anchor', {
           after: getPanelDebugSnapshot(panel),
@@ -235,15 +226,6 @@
 
     function insertDownloadPanelOrdered(container, panel) {
       if (!(container instanceof Element)) return;
-      const assignmentPanel = container.querySelector(
-        ':scope > .glassmoocs-assignment-reminder-panel',
-      );
-      if (assignmentPanel) {
-        if (assignmentPanel.nextElementSibling !== panel) {
-          container.insertBefore(panel, assignmentPanel.nextElementSibling);
-        }
-        return;
-      }
       if (container.firstElementChild !== panel) {
         container.prepend(panel);
       }

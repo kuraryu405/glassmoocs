@@ -29,11 +29,7 @@
       "matches": ["https://moocs.iniad.org/*"],
       "run_at": "document_end",
       "css": ["styles.css"],
-      "js": [
-        "content/assignment-reminder-boot.js",
-        "content/download-panel.js",
-        "content.js"
-      ]
+      "js": ["content/download-panel.js", "content.js"]
     },
     {
       "matches": ["https://docs.google.com/presentation/*"],
