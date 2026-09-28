@@ -174,6 +174,12 @@
       };
     }
 
+    function setPanelNodeText(node, text) {
+      if (node instanceof HTMLElement && node.textContent !== text) {
+        node.textContent = text;
+      }
+    }
+
     function mountDownloadPanel(panel, anchorTarget) {
       const anchor = anchorTarget?.node;
       const placement = anchorTarget?.placement || 'prepend';
@@ -185,7 +191,7 @@
       });
 
       if (!anchor || (placement !== 'prepend' && !anchor.parentElement)) {
-        document.body.prepend(panel);
+        insertDownloadPanelOrdered(document.body, panel);
         debugPanelLog('download panel mounted on body', {
           after: getPanelDebugSnapshot(panel),
         });
@@ -193,7 +199,9 @@
       }
 
       if (placement === 'beforebegin') {
-        anchor.insertAdjacentElement('beforebegin', panel);
+        if (anchor.previousElementSibling !== panel) {
+          anchor.insertAdjacentElement('beforebegin', panel);
+        }
         debugPanelLog('download panel mounted before anchor', {
           after: getPanelDebugSnapshot(panel),
         });
@@ -201,17 +209,44 @@
       }
 
       if (placement === 'afterend') {
-        anchor.insertAdjacentElement('afterend', panel);
+        // assignment パネルが header 直後にいる場合はその後ろに付く。
+        // 両パネルとも header/afterend を要求するため、順序を固定しないと
+        // 毎フレーム奪い合いになる。
+        const assignmentPanel = anchor.nextElementSibling?.classList?.contains(
+          'glassmoocs-assignment-reminder-panel',
+        )
+          ? anchor.nextElementSibling
+          : null;
+        const ref = assignmentPanel || anchor;
+        if (ref.nextElementSibling !== panel) {
+          ref.insertAdjacentElement('afterend', panel);
+        }
         debugPanelLog('download panel mounted after anchor', {
           after: getPanelDebugSnapshot(panel),
         });
         return;
       }
 
-      anchor.prepend(panel);
+      insertDownloadPanelOrdered(anchor, panel);
       debugPanelLog('download panel mounted inside anchor', {
         after: getPanelDebugSnapshot(panel),
       });
+    }
+
+    function insertDownloadPanelOrdered(container, panel) {
+      if (!(container instanceof Element)) return;
+      const assignmentPanel = container.querySelector(
+        ':scope > .glassmoocs-assignment-reminder-panel',
+      );
+      if (assignmentPanel) {
+        if (assignmentPanel.nextElementSibling !== panel) {
+          container.insertBefore(panel, assignmentPanel.nextElementSibling);
+        }
+        return;
+      }
+      if (container.firstElementChild !== panel) {
+        container.prepend(panel);
+      }
     }
 
     async function refreshDownloadPanels() {
@@ -291,13 +326,18 @@
           contextLines.push(`ページ: ${pageContext.pageTitle}`);
 
         if (contextNode) {
-          contextNode.textContent =
+          setPanelNodeText(
+            contextNode,
             contextLines.join(' / ') ||
-            '科目・講義情報を取得できませんでした。';
+              '科目・講義情報を取得できませんでした。',
+          );
         }
 
         if (statusNode) {
-          statusNode.textContent = formatDownloadStateText(state, pageContext);
+          setPanelNodeText(
+            statusNode,
+            formatDownloadStateText(state, pageContext),
+          );
         }
 
         const progress = getDownloadProgress(state);
@@ -310,9 +350,12 @@
             : '0%';
         }
         if (progressLabelNode instanceof HTMLElement) {
-          progressLabelNode.textContent = progress
-            ? `進捗 ${progress.percent}%${progress.label ? ` · ${progress.label}` : ''}`
-            : '';
+          setPanelNodeText(
+            progressLabelNode,
+            progress
+              ? `進捗 ${progress.percent}%${progress.label ? ` · ${progress.label}` : ''}`
+              : '',
+          );
         }
 
         const needsPermission = pageNeedsSlidesCapturePermission(
@@ -325,11 +368,14 @@
         }
 
         if (permissionStatusNode instanceof HTMLElement) {
-          permissionStatusNode.textContent = slidesCapturePermissionGranted
-            ? 'キャプチャ権限は付与済みです。'
-            : needsPermission
-              ? '高速エクスポートが失敗したため、フォールバック用のキャプチャ権限を許可してください。'
-              : '';
+          setPanelNodeText(
+            permissionStatusNode,
+            slidesCapturePermissionGranted
+              ? 'キャプチャ権限は付与済みです。'
+              : needsPermission
+                ? '高速エクスポートが失敗したため、フォールバック用のキャプチャ権限を許可してください。'
+                : '',
+          );
         }
 
         if (permissionButton instanceof HTMLButtonElement) {

@@ -5,6 +5,8 @@
       captureOrigin,
       getRuntimeLastError,
       normalizeText,
+      openSlidesCapturePermissionWindow,
+      persistDownloadState,
       slidesPermissionCard,
       slidesPermissionStatusNode,
       grantSlidesPermissionButton,
@@ -117,17 +119,36 @@
       try {
         grantSlidesPermissionButton.disabled = true;
         setSlidesPermissionStatus('');
+        // popup が閉じると inline 要求は立ち消えるため、専用ウィンドウ経由を
+        // 優先する。開けなければ inline 要求にフォールバックする。
+        if (typeof openSlidesCapturePermissionWindow === 'function') {
+          try {
+            await openSlidesCapturePermissionWindow();
+            setSlidesPermissionStatus(
+              '許可ウィンドウを開きました。ダイアログで許可した後に保存をやり直してください。',
+            );
+            return;
+          } catch {
+            // フォールバックへ進む。
+          }
+        }
         const granted = await permissionsRequest({
           origins: [captureOrigin],
         });
         if (granted) {
           slidesPermissionCard.style.display = 'none';
           setDownloadStateMessage('Slides キャプチャを許可しました。');
-          setCurrentDownloadState({
+          const cleared = {
             ...(getCurrentDownloadState() || {}),
             lastError: '',
             needsCapturePermission: false,
-          });
+          };
+          setCurrentDownloadState(cleared);
+          // メモリ更新だけだと次回 refreshState で storage の古い値に
+          // 上書きされるため永続化する。
+          if (typeof persistDownloadState === 'function') {
+            persistDownloadState(cleared).catch(() => {});
+          }
           return;
         }
         setSlidesPermissionStatus('権限が許可されませんでした。');
