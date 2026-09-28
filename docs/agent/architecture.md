@@ -49,10 +49,11 @@ flowchart LR
 | 領域                  | 代表関数                                                                                                                                                                                                             |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 設定                  | `getDefaultSettings`, `mergeSettings`, `readSettings`                                                                                                                                                                |
-| ページ装飾            | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls`                                                                                                        |
+| ページ装飾            | `enhancePage`, `scheduleEnhancements`, `decorateTabs`, `attachTextareaEnhancements`, `injectDownloadControls`, `injectAssignmentReminderPanel`                                                                       |
 | URL / ページ文脈      | `parseMoocsUrl`, `getCurrentPageContext`, `extractCourseName`, `extractLectureName`                                                                                                                                  |
 | 資料抽出              | `extractAssetCandidates`, `extractLectureEntries`, `extractPageEntries`, `isGoogleSlidesUrl`, `buildGoogleSlidesViewerUrl`, `deriveGoogleDriveDownloadUrl`                                                           |
 | ダウンロード UI・状態 | `createDownloadPanel`, `injectDownloadControls`, `handleCourseCollectionRequest`, `handleLectureDownloadRequest`, `handleCurrentPageDownloadRequest`, `collectLectureAssetsFromCurrentPage`, `createCollectingState` |
+| 課題出し忘れ表示      | `collectAssignmentOverviewFromCurrentPage`, `collectCourseAssignments`, `collectLectureAssignments`, `getAssignmentStatus`, `injectAssignmentReminderPanel`                                                          |
 | メッセージ            | `handleRuntimeMessage`                                                                                                                                                                                               |
 
 補助ファイル:
