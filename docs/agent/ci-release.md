@@ -43,6 +43,8 @@ corepack pnpm run build:amo
 
 各ディレクトリは、ブラウザごとに最後に実行した `release` または `dev` variant で上書きされる。
 
+Firefox build 後は、temporary addon を誤って root の `dist/` から読み込んだ環境向けに、`dist/firefox/` の中身を root `dist/` にもミラーする。canonical な成果物は引き続き `dist/firefox/`。
+
 ---
 
 ## Chromium ビルド成果物の注意
@@ -52,6 +54,7 @@ corepack pnpm run build:amo
 - 出力先は `dist/chromium/`。
 - `dist/chromium/` は最後に実行した `release` / `dev` variant で上書きされる。
 - release build では構造化デバッグログ UI、localhost 送信先、ログ用 storage/message 文字列が `dist/chromium/` から除去される。
+- Chromium の `manifest.json` は `browser_specific_settings` 除去に加え、`background` を `service_worker` のみに正規化する（`scripts` / `preferred_environment` 併記は Chrome MV3 で拒否される）。
 - 開発中にログが必要な場合だけ `build:chromium:dev` を使う。
 
 ---
