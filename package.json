@@ -1,6 +1,6 @@
 {
   "name": "glassmoocs",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.30.2",
@@ -44,5 +44,21 @@
     "overrides": {
       "rollup": "npm:@rollup/wasm-node@4.60.2"
     }
-  }
+  },
+  "description": "INIAD MOOCs 向けのブラウザ拡張です。ページ全体をグラスモーフィズム風に調整しつつ、次の機能を追加します。",
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuraryu405/glassmoocs.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kuraryu405/glassmoocs/issues"
+  },
+  "homepage": "https://github.com/kuraryu405/glassmoocs#readme"
 }

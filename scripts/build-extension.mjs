@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { transformWithEsbuild } from 'vite';
@@ -15,15 +15,21 @@ const browser = rawBrowser;
 const mode = process.argv.includes('--dev') ? 'development' : 'production';
 const debugLogsEnabled = mode !== 'production';
 const DIST_DIR = resolve(ROOT_DIR, 'dist', browser);
+const LEGACY_FIREFOX_DIST_DIR = resolve(ROOT_DIR, 'dist');
 
 const SCRIPT_FILES = [
   'background.js',
+  'background/pdf.js',
   'content.js',
+  'content/assignment-reminder-boot.js',
   'content/download-panel.js',
+  'page-bridge.js',
   'popup.js',
   'popup/slides-permission-card.js',
+  'popup-launcher.js',
   'slides-export.js',
   'slides-export/svg-export.js',
+  'slides-permission.js',
 ];
 
 function readFlagValue(flagName) {
@@ -78,6 +84,15 @@ async function patchManifest() {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   if (browser === 'chromium') {
     delete manifest.browser_specific_settings;
+    // Chrome MV3 では background.scripts 併記が許可されないため、
+    // service_worker のみに正規化する (Firefox 側は scripts 併用を維持)。
+    if (manifest.background && typeof manifest.background === 'object') {
+      const { service_worker: serviceWorker } = manifest.background;
+      manifest.background =
+        typeof serviceWorker === 'string' && serviceWorker
+          ? { service_worker: serviceWorker }
+          : manifest.background;
+    }
   }
 
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -109,32 +124,54 @@ async function transformScript(relativePath) {
 async function postprocessDist() {
   await patchManifest();
   await Promise.all(SCRIPT_FILES.map(transformScript));
-  await sanitizeGeneratedAssetScripts();
+  await assertNoDebugMacroLeak();
 
   const popupPath = resolve(DIST_DIR, 'popup.html');
   const popupHtml = await readFile(popupPath, 'utf8');
   await writeFile(popupPath, stripDebugOnlyHtml(popupHtml));
 }
 
-async function sanitizeGeneratedAssetScripts() {
-  const assetsDir = resolve(DIST_DIR, 'assets');
-  const files = await readdir(assetsDir).catch(() => []);
+// 正規表現の穴でマクロが残留すると実行時に ReferenceError で
+// スクリプト全体が死ぬため、残留があればビルド失敗させる。
+async function assertNoDebugMacroLeak() {
   await Promise.all(
-    files
-      .filter((file) => file.endsWith('.js'))
-      .map(async (file) => {
-        const filePath = resolve(assetsDir, file);
-        const source = await readFile(filePath, 'utf8');
-        const sanitized = source.replaceAll('.innerHTML=', '.textContent=');
-        if (sanitized !== source) {
-          await writeFile(filePath, sanitized);
-        }
-      }),
+    SCRIPT_FILES.map(async (relativePath) => {
+      const filePath = resolve(DIST_DIR, relativePath);
+      const source = await readFile(filePath, 'utf8');
+      if (
+        source.includes('__GLASSMOOCS_DEBUG_STRING__') ||
+        source.includes('__GLASSMOOCS_ENABLE_DEBUG_LOGS__')
+      ) {
+        throw new Error(`debug macro leaked in ${relativePath}`);
+      }
+    }),
   );
 }
+
+async function syncLegacyFirefoxDist() {
+  if (browser !== 'firefox') {
+    return;
+  }
+
+  const entries = await readdir(DIST_DIR);
+  await Promise.all(
+    entries.map((entry) =>
+      cp(resolve(DIST_DIR, entry), resolve(LEGACY_FIREFOX_DIST_DIR, entry), {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  );
+}
+
+// NOTE: かつて存在した assets への `.innerHTML=`→`.textContent=` 盲目置換は
+// 削除した。対象は Preact ランタイムの dangerouslySetInnerHTML 実装であり、
+// 置換すると将来の正当な HTML 描画を静かに壊す。src/ 側で innerHTML を
+// 使わない運用で AMO 警告に対応する。
 
 await run('pnpm', ['exec', 'vite', 'build', '--mode', mode], {
   GLASSMOOCS_BUILD_BROWSER: browser,
   GLASSMOOCS_DEBUG_LOGS: debugLogsEnabled ? 'true' : 'false',
 });
 await postprocessDist();
+await syncLegacyFirefoxDist();
