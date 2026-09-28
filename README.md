@@ -111,6 +111,14 @@ GitHub Actions ではこれに加えて、配布用 ZIP の作成と `addons-lin
 
 Firefox の一時アドオンはブラウザ再起動で消えるため、継続利用する場合は署名付きパッケージ化が別途必要です。
 
+## GitHub Releases から入れる
+
+`v*` タグの push で `glassmoocs-chromium.zip` / `glassmoocs-firefox.zip` 付きの Release が自動作成されます。
+
+1. Release ページから使うブラウザの ZIP をダウンロードして展開する
+2. Chromium 系(Chrome / Dia / Edge): `chrome://extensions` でデベロッパーモードを有効にし、「パッケージ化されていない拡張機能を読み込む」で展開フォルダを選ぶ
+3. Firefox: `about:debugging#/runtime/this-firefox` で「一時的なアドオンを読み込む」から `manifest.json` を選ぶ(再起動で消える点は上記参照)
+
 ## Firefox Add-ons (AMO) で公開する
 
 1. `pnpm run ci` を実行して lint / format / build を通す
