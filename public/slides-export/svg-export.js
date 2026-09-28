@@ -57,13 +57,40 @@
       return await readBlobAsDataUrl(await response.blob());
     }
 
-    async function fetchImageViaBackground(url) {
+    function getRuntimeLastError() {
+      return globalThis.chrome?.runtime?.lastError || null;
+    }
+
+    async function sendMessageToBackground(message) {
       const api = getApi();
       if (!api?.runtime?.sendMessage) {
         throw new Error('runtime.sendMessage unavailable');
       }
 
-      const response = await api.runtime.sendMessage({
+      const result = api.runtime.sendMessage(message);
+      if (result && typeof result.then === 'function') {
+        return await result;
+      }
+
+      return await new Promise((resolve, reject) => {
+        try {
+          api.runtime.sendMessage(message, (response) => {
+            const error = getRuntimeLastError();
+            if (error) {
+              reject(new Error(error.message));
+              return;
+            }
+
+            resolve(response);
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+
+    async function fetchImageViaBackground(url) {
+      const response = await sendMessageToBackground({
         type: MESSAGE_TYPES.fetchImageDataUrl,
         url: url.toString(),
       });
@@ -79,6 +106,7 @@
     async function mapWithConcurrency(items, limit, worker) {
       const queue = [...items];
       const workerCount = Math.max(1, Math.min(limit, queue.length));
+      let failedCount = 0;
 
       await Promise.all(
         Array.from({ length: workerCount }, async () => {
@@ -88,10 +116,16 @@
               return;
             }
 
-            await worker(item);
+            // 想定外 throw でページ全体を道連れにしない。
+            try {
+              await worker(item);
+            } catch {
+              failedCount += 1;
+            }
           }
         }),
       );
+      return failedCount;
     }
 
     async function inlineSlideImages(svg, pageIndex) {
@@ -111,7 +145,7 @@
         __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
       );
 
-      await mapWithConcurrency(
+      const unexpectedFailures = await mapWithConcurrency(
         imageNodes,
         INLINE_IMAGE_CONCURRENCY,
         async (imageNode) => {
@@ -213,7 +247,7 @@
           imageNodeCount: imageNodes.length,
           directSuccessCount,
           backgroundSuccessCount,
-          failedCount,
+          failedCount: failedCount + unexpectedFailures,
           durationMs: Date.now() - startedAt,
         },
         __GLASSMOOCS_DEBUG_STRING__('H-SVG-B'),
@@ -291,39 +325,62 @@
       return result;
     }
 
+    // onload/onerror のどちらも発火しないデコード失敗で永久ハングするため、
+    // 画像・canvas の非同期変換には上限を付ける。
+    const RASTER_TIMEOUT_MS = 30000;
+
+    function withRasterTimeout(promise, message) {
+      let timer = 0;
+      const timeout = new Promise((_, reject) => {
+        timer = window.setTimeout(
+          () => reject(new Error(message)),
+          RASTER_TIMEOUT_MS,
+        );
+      });
+      return Promise.race([promise, timeout]).finally(() => {
+        window.clearTimeout(timer);
+      });
+    }
+
     async function imageFromSvgText(svgText) {
       const blob = new Blob([svgText], {
         type: 'image/svg+xml;charset=utf-8',
       });
       const blobUrl = URL.createObjectURL(blob);
       try {
-        return await new Promise((resolve, reject) => {
-          const image = new Image();
-          image.onload = () => resolve(image);
-          image.onerror = () =>
-            reject(new Error('serialized slide image failed to load'));
-          image.src = blobUrl;
-        });
+        return await withRasterTimeout(
+          new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () =>
+              reject(new Error('serialized slide image failed to load'));
+            image.src = blobUrl;
+          }),
+          'serialized slide image load timed out',
+        );
       } finally {
         URL.revokeObjectURL(blobUrl);
       }
     }
 
     async function canvasToJpegDataUrl(canvas, quality) {
-      const blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (value) => {
-            if (!value) {
-              reject(new Error('slide jpeg export failed'));
-              return;
-            }
+      const blob = await withRasterTimeout(
+        new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (value) => {
+              if (!value) {
+                reject(new Error('slide jpeg export failed'));
+                return;
+              }
 
-            resolve(value);
-          },
-          'image/jpeg',
-          quality,
-        );
-      });
+              resolve(value);
+            },
+            'image/jpeg',
+            quality,
+          );
+        }),
+        'slide jpeg export timed out',
+      );
       return await readBlobAsDataUrl(blob);
     }
 
@@ -356,20 +413,32 @@
       const minHeight = Number.isFinite(options.minHeight)
         ? Math.max(1, options.minHeight)
         : 576;
-      const targetWidth = Math.max(
+      // 異常 viewBox で巨大 canvas を確保してクラッシュさせないための上限。
+      const MAX_RASTER_DIMENSION = 4096;
+      const MAX_RASTER_AREA = 16 * 1024 * 1024;
+      let targetWidth = Math.max(
         minWidth,
         requestedWidth ? Math.round(requestedWidth * scale) : 0,
         Number(serialized.viewBoxWidth)
           ? Math.round(Number(serialized.viewBoxWidth) * scale)
           : 0,
       );
-      const targetHeight = Math.max(
+      let targetHeight = Math.max(
         minHeight,
         requestedHeight ? Math.round(requestedHeight * scale) : 0,
         Number(serialized.viewBoxHeight)
           ? Math.round(Number(serialized.viewBoxHeight) * scale)
           : 0,
       );
+      targetWidth = Math.min(targetWidth, MAX_RASTER_DIMENSION);
+      targetHeight = Math.min(targetHeight, MAX_RASTER_DIMENSION);
+      if (targetWidth * targetHeight > MAX_RASTER_AREA) {
+        const shrink = Math.sqrt(
+          MAX_RASTER_AREA / (targetWidth * targetHeight),
+        );
+        targetWidth = Math.max(1, Math.floor(targetWidth * shrink));
+        targetHeight = Math.max(1, Math.floor(targetHeight * shrink));
+      }
       const quality =
         Number.isFinite(options.quality) && options.quality > 0
           ? Math.min(1, Math.max(0.1, options.quality / 100))

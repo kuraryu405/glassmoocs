@@ -352,16 +352,24 @@
     };
   }
 
+  // svg-export.js の欠落・先行 throw でも message handler 登録まで到達させ、
+  // 未初期化時は明示エラーを返す(切れ味の悪い全損タイムアウトを避ける)。
+  const slidesSvgExportFactory =
+    globalThis.__glassmoocsCreateSlidesSvgExportUtils;
+  const slidesSvgExportUtils =
+    typeof slidesSvgExportFactory === 'function'
+      ? slidesSvgExportFactory({
+          INLINE_IMAGE_CONCURRENCY,
+          MESSAGE_TYPES,
+          getApi,
+          getCurrentPage,
+          getSlideSvg,
+          normalizeText,
+          postAgentLog,
+        })
+      : null;
   const { rasterizeCurrentSlideJpeg, serializeCurrentSlideSvg } =
-    globalThis.__glassmoocsCreateSlidesSvgExportUtils({
-      INLINE_IMAGE_CONCURRENCY,
-      MESSAGE_TYPES,
-      getApi,
-      getCurrentPage,
-      getSlideSvg,
-      normalizeText,
-      postAgentLog,
-    });
+    slidesSvgExportUtils || {};
 
   async function waitFor(check, options = {}) {
     const timeout = options.timeout || 15000;
@@ -517,11 +525,13 @@
       },
       AGENT_LOG_HYPOTHESES.slide,
     );
-    const direction = page > currentPage ? 'right' : 'left';
     let safety = 0;
 
+    // 初回 currentPage が stale のままだと逆方向に送り続けるため、
+    // 毎周回ごとに方向を再評価する。
     while (getCurrentPage() !== page && safety < 1000) {
-      dispatchArrowKey(direction);
+      const now = getCurrentPage();
+      dispatchArrowKey(page > now ? 'right' : 'left');
       await sleep(55);
       safety += 1;
     }
@@ -610,10 +620,16 @@
         const ready =
           pageMatchedDuration >= FRESH_SLIDE_SETTLE_MS && hasSettledSnapshot;
         if (ready) {
-          acceptedBy =
-            normalizeText(previousSnapshot) && snapshot === previousSnapshot
-              ? 'page-indicator-reused-snapshot'
-              : 'page-indicator-fresh-snapshot';
+          // 前ページと同一スナップショットは stale とみなし受理しない。
+          // 受理すると前ページ内容の重複シリアライズ=当該ページ欠落になる。
+          // (snapshot 先頭は getCurrentPage() を含むため、正常遷移で一致はしない)
+          if (
+            normalizeText(previousSnapshot) &&
+            snapshot === previousSnapshot
+          ) {
+            return false;
+          }
+          acceptedBy = 'page-indicator-fresh-snapshot';
           acceptedPageMatchedDuration = pageMatchedDuration;
           acceptedSnapshotStableDuration = snapshotStableDuration;
         }
@@ -772,6 +788,13 @@
 
       if (type === MESSAGE_TYPES.serializeCurrentSlideSvg) {
         const page = Number(message?.page);
+        if (typeof serializeCurrentSlideSvg !== 'function') {
+          sendResponse({
+            ok: false,
+            error: 'Slides SVG エクスポート機能を初期化できませんでした。',
+          });
+          return false;
+        }
         serializeCurrentSlideSvg(page)
           .then((result) =>
             sendResponse({
@@ -809,6 +832,13 @@
 
       if (type === MESSAGE_TYPES.rasterizeCurrentSlideJpeg) {
         const page = Number(message?.page);
+        if (typeof rasterizeCurrentSlideJpeg !== 'function') {
+          sendResponse({
+            ok: false,
+            error: 'Slides JPEG エクスポート機能を初期化できませんでした。',
+          });
+          return false;
+        }
         rasterizeCurrentSlideJpeg(page, {
           quality: Number(message?.quality),
           scale: Number(message?.scale),

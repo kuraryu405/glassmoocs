@@ -939,6 +939,12 @@
   }
 
   function isFirefoxLike() {
+    // browser 名前空間があるのは Firefox 系。UA は削減/偽装されうるので
+    // フォールバックとしてのみ使う。
+    if (typeof globalThis.browser?.runtime?.getURL === 'function') {
+      return true;
+    }
+
     const userAgent = normalizeText(globalThis.navigator?.userAgent);
     return /firefox/i.test(userAgent);
   }
@@ -1126,6 +1132,11 @@
 
   async function interruptSlidesQueueIfForegrounded(state) {
     const normalized = normalizeState(state);
+    // Chromium では Slides タブの前面化が rasterize の前提のため、
+    // 前面化をもって中断とみなさない(assertSlidesTabStillInBackground と対称)。
+    if (shouldActivateSlidesExportTab()) {
+      return normalized;
+    }
     if (
       !isTransientStatus(normalized.status) ||
       normalizeText(normalized.activeJobType) !== 'google_slides' ||
@@ -1178,6 +1189,11 @@
     return normalized;
   }
 
+  async function loadStateRaw() {
+    const result = await storageGet([DOWNLOAD_STATE_STORAGE_KEY]);
+    return normalizeState(result[DOWNLOAD_STATE_STORAGE_KEY]);
+  }
+
   async function loadState() {
     const result = await storageGet([DOWNLOAD_STATE_STORAGE_KEY]);
     return await interruptSlidesQueueIfForegrounded(
@@ -1191,12 +1207,27 @@
     return await saveState(recovered);
   }
 
+  // 起動直後の recover と初回 queueDownloads の saveState 競合を防ぐ。
+  const startupReady = recoverStateOnStartup().catch(() => {
+    saveState(createIdleState()).catch(() => {});
+  });
+
   async function saveState(nextState) {
     const normalized = normalizeState(nextState);
     await storageSet({
       [DOWNLOAD_STATE_STORAGE_KEY]: normalized,
     });
     return normalized;
+  }
+
+  // storage への read-modify-write を一本化するチェーン。
+  // updateQueueState と saveProgressState が別チェーンだと互いの
+  // pending/completed 更新を上書きし合うため。
+  let persistedStateWrite = Promise.resolve();
+
+  function serializePersistedStateWrite(task) {
+    persistedStateWrite = persistedStateWrite.catch(() => {}).then(task);
+    return persistedStateWrite;
   }
 
   function summarizeEntry(entry) {
@@ -1350,7 +1381,14 @@
       active: shouldActivateSlidesExportTab(),
     });
     rememberActiveSlidesTab(slidesTab?.id);
-    return await waitForTabLoad(slidesTab.id, viewerUrl, cancelToken);
+    // waitForTabLoad の失敗で throw すると作成タブが orphan 化するため、
+    // ここで閉じてから再 throw する。
+    try {
+      return await waitForTabLoad(slidesTab.id, viewerUrl, cancelToken);
+    } catch (error) {
+      await closeTabQuietly(slidesTab.id);
+      throw error;
+    }
   }
 
   function createCancellationError() {
@@ -1471,12 +1509,16 @@
   }
 
   async function saveProgressState(baseState, patch) {
-    const latest = normalizeState(await loadState());
-    await saveState({
-      ...latest,
-      courseName: latest.courseName || normalizeText(baseState?.courseName),
-      startedAt: latest.startedAt || normalizeText(baseState?.startedAt),
-      ...patch,
+    // loadState() ではなく Raw を使う。loadState は前面化タブを見ると
+    // queueNonce++ の中断副作用を持つため、進捗保存のたびに発火させない。
+    return await serializePersistedStateWrite(async () => {
+      const latest = normalizeState(await loadStateRaw());
+      await saveState({
+        ...latest,
+        courseName: latest.courseName || normalizeText(baseState?.courseName),
+        startedAt: latest.startedAt || normalizeText(baseState?.startedAt),
+        ...patch,
+      });
     });
   }
 
@@ -1594,14 +1636,22 @@
       AGENT_LOG_HYPOTHESES.pdf,
     );
 
+    let missingCount = 0;
     while (Date.now() < timeoutAt) {
       assertNotCanceled(cancelToken);
       const items = await downloadsSearch({ id: downloadId });
       const item = items[0];
 
       if (!item) {
-        throw new Error(`download disappeared: ${downloadId}`);
+        // 受付直後は search インデックス未反映があり得るため即 throw しない。
+        missingCount += 1;
+        if (missingCount >= 3) {
+          throw new Error(`download disappeared: ${downloadId}`);
+        }
+        await sleep(400);
+        continue;
       }
+      missingCount = 0;
 
       if (item.state === 'complete') {
         postAgentLog(
@@ -1961,13 +2011,22 @@
 
     const blobUrl = URL.createObjectURL(blob);
     try {
-      return await new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () =>
-          reject(new Error('image element fallback failed to load svg'));
-        image.src = blobUrl;
-      });
+      // onload/onerror が沈黙するデコード失敗で永久ハングするため上限付き。
+      return await Promise.race([
+        new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () =>
+            reject(new Error('image element fallback failed to load svg'));
+          image.src = blobUrl;
+        }),
+        new Promise((_, reject) => {
+          globalThis.setTimeout(
+            () => reject(new Error('image element fallback timed out')),
+            30000,
+          );
+        }),
+      ]);
     } finally {
       URL.revokeObjectURL(blobUrl);
     }
@@ -2024,7 +2083,25 @@
         },
         AGENT_LOG_HYPOTHESES.pdf,
       );
-      fallbackImage = await loadBlobImageElement(blob);
+      fallbackImage = null;
+      try {
+        fallbackImage = await loadBlobImageElement(blob);
+      } catch (error) {
+        postAgentLog(
+          'background.js:renderSerializedSlidePage',
+          'html image rasterization failed, falling back to image bitmap',
+          {
+            requestedWidth,
+            requestedHeight,
+            targetWidth,
+            targetHeight,
+            svgLength: svgText.length,
+            error: summarizeError(error),
+          },
+          AGENT_LOG_HYPOTHESES.pdf,
+        );
+        bitmap = await createImageBitmap(blob);
+      }
     } else {
       postAgentLog(
         'background.js:renderSerializedSlidePage',
@@ -2159,6 +2236,23 @@
     }
   }
 
+  // svg-export.js の inlineSlideImages と同一の許可条件。background 経由の
+  // fetch を任意ホストへの認証付き fetch に使わせないため。
+  function isAllowedSlideImageUrl(rawUrl) {
+    let url = null;
+    try {
+      url = new URL(normalizeText(rawUrl));
+    } catch {
+      return false;
+    }
+    if (url.protocol !== 'https:') return false;
+    return (
+      url.hostname === 'docs.google.com' ||
+      url.hostname.endsWith('.googleusercontent.com') ||
+      url.hostname.endsWith('.gstatic.com')
+    );
+  }
+
   async function fetchImageDataUrl(url) {
     postAgentLog(
       'background.js:fetchImageDataUrl',
@@ -2168,6 +2262,9 @@
       },
       AGENT_LOG_HYPOTHESES.svg,
     );
+    if (!isAllowedSlideImageUrl(url)) {
+      throw new Error('image host is not allowed');
+    }
     const response = await fetch(url, {
       credentials: 'include',
     });
@@ -2396,6 +2493,26 @@
       stage: 'prepare-slide-capture',
     });
 
+    // capture には前面タブが必要。Firefox では export タブをわざと後ろに
+    // 置くため、ここで前面化しないと ensureCaptureTabActive が必ず throw する。
+    try {
+      const activeTabs = await tabsQuery({ active: true, windowId });
+      if (activeTabs[0]?.id !== tabId) {
+        await tabsUpdate(tabId, { active: true });
+      }
+    } catch (error) {
+      postAgentLog(
+        'background.js:processSlidesDownloadByCapture',
+        'capture tab activation failed',
+        {
+          tabId,
+          windowId,
+          error: summarizeError(error),
+        },
+        AGENT_LOG_HYPOTHESES.capture,
+      );
+    }
+
     const session = await requestSlidesSessionInfo(tabId, cancelToken);
     if (!Number.isFinite(session.totalPages) || session.totalPages <= 0) {
       throw new Error('Slides の総ページ数を取得できませんでした。');
@@ -2521,7 +2638,12 @@
         let loadedTab = null;
         try {
           loadedTab = await openOrReuseSlidesTab(tabId, viewerUrl, cancelToken);
-        } catch {
+        } catch (error) {
+          // キャンセルは即座に伝播させる。呑んで continue すると
+          // sleep+タブ churn の後に abort する無駄が生じる。
+          if (isCancellationError(error)) {
+            throw error;
+          }
           if (tabId !== -1) {
             await closeTabQuietly(tabId);
             tabId = -1;
@@ -2622,6 +2744,8 @@
   }
 
   async function queueDownloads(payload) {
+    // 起動直後の recover 書き込みと競合させない。
+    await startupReady;
     const debugLogContext = normalizeDebugLogContext(
       payload?.debugLogContext,
       AGENT_LOG_SESSION_ID,
@@ -2720,14 +2844,16 @@
     let stateWrite = Promise.resolve();
 
     async function updateQueueState(updater) {
-      stateWrite = stateWrite
-        .catch(() => {})
-        .then(async () => {
-          const latest = normalizeState(await loadState());
-          state = normalizeState(updater(latest));
-          await saveState(state);
+      stateWrite = serializePersistedStateWrite(async () => {
+        // リセット後に旧ワーカーが idle を進行中に上書きするのを防ぐ。
+        if (cancelToken.isCanceled()) {
           return state;
-        });
+        }
+        const latest = normalizeState(await loadState());
+        state = normalizeState(updater(latest));
+        await saveState(state);
+        return state;
+      });
       return await stateWrite;
     }
 
@@ -2762,7 +2888,6 @@
             ? `open-slides-viewer (${workerIndex + 1}/${DOWNLOAD_PARALLEL_LIMIT})`
             : 'download-direct-file',
         lastError: '',
-        needsCapturePermission: false,
       }));
       postAgentLog(
         'background.js:queueDownloads',
@@ -2815,7 +2940,6 @@
           ],
           stage: '',
           lastError: '',
-          needsCapturePermission: false,
         }));
       } catch (error) {
         if (isCancellationError(error)) {
@@ -2859,9 +2983,11 @@
           ],
           stage: '',
           lastError: normalizeText(error?.message, 'download failed'),
+          // 並列ワーカー間の last-writer-wins を避けるため OR 蓄積する。
           needsCapturePermission:
+            !!latest.needsCapturePermission ||
             normalizeText(error?.code) ===
-            ERROR_CODES.capturePermissionRequired,
+              ERROR_CODES.capturePermissionRequired,
         }));
       }
     }
@@ -2956,7 +3082,8 @@
     const type = normalizeText(message?.type);
 
     if (type === MESSAGE_TYPES.getState) {
-      loadState()
+      // 読み取り専用。loadState() は前面化検知で中断副作用を持つため使わない。
+      loadStateRaw()
         .then((state) => sendResponse({ ok: true, state }))
         .catch((error) =>
           sendResponse({
@@ -3124,7 +3251,5 @@
     return false;
   });
 
-  recoverStateOnStartup().catch(() => {
-    saveState(createIdleState()).catch(() => {});
-  });
+  startupReady.catch(() => {});
 })();

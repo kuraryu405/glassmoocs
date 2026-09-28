@@ -109,7 +109,7 @@
 
     requestInFlight = true;
     grantButton.disabled = true;
-    setStatus('Firefox の確認ダイアログで「許可」を選んでください。');
+    setStatus('確認ダイアログで「許可」を選んでください。');
 
     try {
       const granted = await permissionsRequest({ origins: [CAPTURE_ORIGIN] });
@@ -142,9 +142,7 @@
     requestPermission();
   });
 
-  refreshPermissionState().finally(() => {
-    window.setTimeout(() => {
-      requestPermission().catch(() => {});
-    }, 0);
-  });
+  // permissions.request は Chromium ではユーザージェスチャ必須のため、
+  // 開いた直後の自動要求はしない。ボタンクリック(ジェスチャ)でのみ要求する。
+  refreshPermissionState().catch(() => {});
 })();
