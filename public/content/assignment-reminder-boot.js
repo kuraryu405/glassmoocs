@@ -3,6 +3,13 @@
   document.documentElement.dataset.glassmoocsAssignmentBoot = 'true';
 
   function mountPanel() {
+    if (
+      !/^\/courses\/\d{4}\/[^/]+(?:\/[^/]+){0,2}\/?$/.test(
+        window.location.pathname,
+      )
+    ) {
+      return;
+    }
     if (document.querySelector('.glassmoocs-assignment-reminder-panel')) {
       return;
     }

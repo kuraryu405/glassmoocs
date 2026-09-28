@@ -2299,186 +2299,6 @@
         startAssignmentReminderScan(panel);
       });
     }
-    // 科目一覧(/courses)では科目ごとの確認ボタンと「戻る」を委譲で受ける。
-    panel.addEventListener('click', (event) => {
-      const courseButton = event.target?.closest?.(
-        '[data-glassmoocs-course-scan-url]',
-      );
-      if (
-        courseButton instanceof HTMLButtonElement &&
-        panel.contains(courseButton) &&
-        !courseButton.disabled
-      ) {
-        event.preventDefault();
-        startCourseAssignmentScan(
-          panel,
-          normalizeText(courseButton.dataset.glassmoocsCourseScanUrl),
-          normalizeText(
-            courseButton.dataset.glassmoocsCourseScanName,
-            'course',
-          ),
-        );
-        return;
-      }
-      const backButton = event.target?.closest?.(
-        '[data-glassmoocs-assignment-action="back"]',
-      );
-      if (
-        backButton instanceof HTMLButtonElement &&
-        panel.contains(backButton)
-      ) {
-        event.preventDefault();
-        activeSiteCourseScanKey = '';
-        renderSiteCourseList(panel);
-      }
-    });
-  }
-
-  // 全体一括スキャン中に enhancePage() が再実行されても UI を壊さないための追跡。
-  let activeSiteCourseScanKey = '';
-
-  function setSiteScanActionVisible(panel, visible) {
-    const actionsNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-actions',
-    );
-    if (actionsNode instanceof HTMLElement) {
-      actionsNode.style.display = visible ? '' : 'none';
-    }
-  }
-
-  function renderSiteCourseList(panel) {
-    const titleNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-title',
-    );
-    const summaryNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-summary',
-    );
-    const bodyNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-body',
-    );
-    setNodeText(titleNode, '全体の課題の出し忘れ');
-    setNodeText(summaryNode, '確認したい科目を選んでください。');
-    // 全体一括スキャンは科目数×講義数×ページ数の fetch になるため置かない。
-    setSiteScanActionVisible(panel, false);
-    if (!(bodyNode instanceof HTMLElement)) return;
-    const courses = extractCourseEntries(document, window.location.href);
-    const listSig = ['s', ...courses.map((course) => course.url)].join('|');
-    // 同一科目一覧での再構築はボタンの作り直し(フォーカス喪失・クリック不発)
-    // になるため skip する。
-    if (panel.dataset.glassmoocsAssignmentRenderSig === listSig) {
-      return;
-    }
-    panel.dataset.glassmoocsAssignmentRenderSig = listSig;
-    bodyNode.replaceChildren();
-    if (!courses.length) {
-      bodyNode.textContent = '科目一覧を取得できませんでした。';
-      return;
-    }
-    const list = document.createElement('ul');
-    list.className = 'glassmoocs-assignment-reminder-list';
-    courses.forEach((course) => {
-      const item = document.createElement('li');
-      const label = document.createElement('span');
-      label.textContent = normalizeText(course.name, 'course');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'glassmoocs-assignment-reminder-button';
-      button.dataset.glassmoocsCourseScanUrl = course.url;
-      button.dataset.glassmoocsCourseScanName = normalizeText(
-        course.name,
-        'course',
-      );
-      button.textContent = '確認';
-      item.append(label, document.createTextNode(' '), button);
-      list.append(item);
-    });
-    bodyNode.append(list);
-  }
-
-  function appendSiteBackButton(panel) {
-    const actionsNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-actions',
-    );
-    if (!(actionsNode instanceof HTMLElement)) return;
-    actionsNode.style.display = '';
-    let back = actionsNode.querySelector(
-      '[data-glassmoocs-assignment-action="back"]',
-    );
-    if (!(back instanceof HTMLButtonElement)) {
-      back = document.createElement('button');
-      back.type = 'button';
-      back.className = 'glassmoocs-assignment-reminder-button';
-      back.dataset.glassmoocsAssignmentAction = 'back';
-      back.textContent = '科目一覧に戻る';
-      actionsNode.append(back);
-    }
-    back.hidden = false;
-  }
-
-  function startCourseAssignmentScan(panel, courseUrl, courseName) {
-    if (!courseUrl) return;
-    // URL 正規化なしでは末尾スラッシュ違いで別キーになる。
-    const cacheKey = `course::${canonicalizeAssetUrl(courseUrl) || courseUrl}`;
-    trimAssignmentScanCache(cacheKey);
-    activeSiteCourseScanKey = cacheKey;
-    assignmentScanCache.set(cacheKey, {
-      status: 'pending',
-      result: null,
-      progress: null,
-    });
-    const summaryNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-summary',
-    );
-    const bodyNode = panel.querySelector(
-      '.glassmoocs-assignment-reminder-body',
-    );
-    setSiteScanActionVisible(panel, false);
-    if (summaryNode) {
-      summaryNode.textContent = `${courseName} を確認しています...`;
-    }
-    if (bodyNode instanceof HTMLElement) {
-      bodyNode.replaceChildren();
-    }
-    collectCourseAssignments(courseUrl, courseName, {
-      onProgress(progress) {
-        // 別科目スキャンに切り替わっていたら stale なので描画しない。
-        if (activeSiteCourseScanKey !== cacheKey) return;
-        assignmentScanCache.set(cacheKey, {
-          status: 'pending',
-          result: null,
-          progress,
-        });
-        setNodeText(summaryNode, formatAssignmentScanProgress(progress));
-      },
-    })
-      .then((result) => {
-        if (activeSiteCourseScanKey !== cacheKey) return;
-        // collectCourseAssignments の戻りには件数サマリが無いため補う。
-        const assignments = Array.isArray(result?.assignments)
-          ? result.assignments
-          : [];
-        const fullResult = {
-          ...result,
-          assignments,
-          assignmentCount: assignments.length,
-          pendingCount: assignments.filter((item) => item.status === 'pending')
-            .length,
-        };
-        // キーは残す: enhancePage() 再実行時に結果表示を復元するため。
-        // 「戻る」でだけクリアする。
-        assignmentScanCache.set(cacheKey, {
-          status: 'done',
-          result: fullResult,
-        });
-        renderAssignmentReminderPanel(panel, fullResult);
-        appendSiteBackButton(panel);
-      })
-      .catch((error) => {
-        if (activeSiteCourseScanKey !== cacheKey) return;
-        assignmentScanCache.set(cacheKey, { status: 'failed', error });
-        renderAssignmentReminderPanel(panel, null, error);
-        appendSiteBackButton(panel);
-      });
   }
 
   const ASSIGNMENT_SCAN_CACHE_LIMIT = 50;
@@ -2499,35 +2319,16 @@
 
   function injectAssignmentReminderPanel() {
     let panel = document.querySelector('.glassmoocs-assignment-reminder-panel');
+    if (getCurrentAssignmentScope() === 'site') {
+      panel?.remove();
+      return;
+    }
     if (!panel) {
       panel = createAssignmentReminderPanel();
     }
     attachAssignmentReminderPanelListeners(panel);
 
     mountAssignmentReminderPanel(panel);
-
-    if (getCurrentAssignmentScope() === 'site') {
-      const active = activeSiteCourseScanKey
-        ? assignmentScanCache.get(activeSiteCourseScanKey)
-        : null;
-      if (active?.status === 'pending') {
-        renderAssignmentReminderPending(panel, active.progress);
-        setSiteScanActionVisible(panel, false);
-        return;
-      }
-      if (active?.status === 'done') {
-        renderAssignmentReminderPanel(panel, active.result);
-        appendSiteBackButton(panel);
-        return;
-      }
-      if (active?.status === 'failed') {
-        renderAssignmentReminderPanel(panel, null, active.error);
-        appendSiteBackButton(panel);
-        return;
-      }
-      renderSiteCourseList(panel);
-      return;
-    }
 
     const cacheKey = getAssignmentScanCacheKey();
     const cached = assignmentScanCache.get(cacheKey);
