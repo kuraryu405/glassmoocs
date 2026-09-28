@@ -14,7 +14,6 @@
         }
       : {}),
     getPageContext: 'glassmoocs:get-page-context',
-    collectAssignments: 'glassmoocs:collect-assignments',
     startCourseCollection: 'glassmoocs:start-course-collection',
     downloadCurrentLecture: 'glassmoocs:download-current-lecture',
     downloadCurrentPage: 'glassmoocs:download-current-page',
@@ -38,10 +37,6 @@
     'download-progress-label',
   );
   const collectCourseButton = document.getElementById('collect-course-button');
-  const collectAssignmentsButton = document.getElementById(
-    'collect-assignments-button',
-  );
-  const assignmentStateNode = document.getElementById('assignment-state');
   const downloadLectureButton = document.getElementById(
     'download-lecture-button',
   );
@@ -69,7 +64,6 @@
   let currentTabId = null;
   let currentPageContext = null;
   let currentDownloadState = null;
-  let currentAssignmentResult = null;
 
   function formatTimestamp(timestamp) {
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
@@ -309,62 +303,8 @@
 
   function setButtonsDisabled(disabled) {
     collectCourseButton.disabled = disabled;
-    collectAssignmentsButton.disabled = disabled;
     downloadLectureButton.disabled = disabled;
     downloadPageButton.disabled = disabled;
-  }
-
-  function getAssignmentStatusLabel(status) {
-    if (status === 'pending') return '未提出';
-    if (status === 'submitted') return '提出済み';
-    if (status === 'closed') return '受付終了';
-    return '不明';
-  }
-
-  function formatAssignmentResult(result) {
-    if (!result) {
-      return 'まだ確認していません。';
-    }
-
-    const assignments = Array.isArray(result.assignments)
-      ? result.assignments
-      : [];
-    const pending = assignments.filter((item) => item.status === 'pending');
-    const unknown = assignments.filter((item) => item.status === 'unknown');
-    const failures = Array.isArray(result.failures) ? result.failures : [];
-
-    if (!assignments.length) {
-      const suffix = failures.length ? `\n取得失敗: ${failures.length} 件` : '';
-      return `課題ページは見つかりませんでした。${suffix}`;
-    }
-
-    const targetItems = pending.length ? pending : unknown;
-    const header = [
-      result.courseName ? `科目: ${result.courseName}` : '',
-      `課題: ${assignments.length} 件`,
-      `未提出: ${pending.length} 件`,
-      unknown.length ? `判定不明: ${unknown.length} 件` : '',
-      failures.length ? `取得失敗: ${failures.length} 件` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-    const list = targetItems.slice(0, 8).map((item) => {
-      const title = [item.lectureName, item.pageTitle]
-        .filter(Boolean)
-        .join(' / ');
-      const due = item.dueText ? `\n  ${item.dueText}` : '';
-      return `- [${getAssignmentStatusLabel(item.status)}] ${title}${due}`;
-    });
-    const more =
-      targetItems.length > list.length
-        ? `\n- 他 ${targetItems.length - list.length} 件`
-        : '';
-
-    if (!targetItems.length) {
-      return `${header}\n未提出っぽい課題はありません。`;
-    }
-
-    return `${header}\n${list.join('\n')}${more}`;
   }
 
   function formatState(state) {
@@ -561,9 +501,7 @@
       if (!activeTab?.id) {
         currentTabId = null;
         currentPageContext = null;
-        currentAssignmentResult = null;
         pageContextNode.textContent = 'アクティブタブを取得できませんでした。';
-        assignmentStateNode.textContent = formatAssignmentResult(null);
         setButtonsDisabled(true);
         return;
       }
@@ -573,38 +511,25 @@
 
       if (!response?.ok || !response.context) {
         currentPageContext = null;
-        currentAssignmentResult = null;
         pageContextNode.textContent =
           'MOOCs ページを開いた状態でポップアップを使ってください。';
-        assignmentStateNode.textContent = formatAssignmentResult(null);
         setButtonsDisabled(true);
         return;
       }
 
       currentPageContext = response.context;
-      currentAssignmentResult = null;
       pageContextNode.textContent = formatPageContext(response.context);
-      assignmentStateNode.textContent = formatAssignmentResult(null);
       setButtonsDisabled(false);
       downloadLectureButton.disabled = !response.context.lectureUrl;
       downloadPageButton.disabled =
         !Array.isArray(response.context.assetCandidates) ||
         response.context.assetCandidates.length === 0;
-      // content 側の collect-assignments は courseUrl 必須のため、
-      // 科目一覧では押せないようにして頁内 UI へ誘導する。
-      collectAssignmentsButton.disabled = !response.context.courseUrl;
-      if (!response.context.courseUrl) {
-        assignmentStateNode.textContent =
-          '科目一覧では確認できません。科目・講義ページか、ページ内の科目別確認を使ってください。';
-      }
       await checkSlidesPermission();
     } catch {
       currentTabId = null;
       currentPageContext = null;
-      currentAssignmentResult = null;
       pageContextNode.textContent =
         'MOOCs ページを開いた状態でポップアップを使ってください。';
-      assignmentStateNode.textContent = formatAssignmentResult(null);
       setButtonsDisabled(true);
       slidesPermissionCard.style.display = 'none';
     }
@@ -717,54 +642,6 @@
     }
   }
 
-  async function handleCollectAssignments() {
-    if (currentTabId == null || !currentPageContext) return;
-
-    setButtonsDisabled(true);
-    assignmentStateNode.textContent = '課題ページを確認しています...';
-
-    try {
-      let response;
-      try {
-        response = await tabsSendMessage(currentTabId, {
-          type: MESSAGE_TYPES.collectAssignments,
-        });
-      } catch {
-        const tabs = await tabsQuery({ active: true, currentWindow: true });
-        const activeTab = tabs[0];
-        if (activeTab?.id === currentTabId) {
-          await ensureMoocsContentReady(activeTab);
-          response = await tabsSendMessage(currentTabId, {
-            type: MESSAGE_TYPES.collectAssignments,
-          });
-        } else {
-          throw new Error('課題確認対象のタブを再取得できませんでした。');
-        }
-      }
-
-      if (!response?.ok || !response.result) {
-        throw new Error(response?.error || '課題確認に失敗しました。');
-      }
-
-      currentAssignmentResult = response.result;
-      assignmentStateNode.textContent = formatAssignmentResult(
-        currentAssignmentResult,
-      );
-    } catch (error) {
-      currentAssignmentResult = null;
-      assignmentStateNode.textContent = normalizeText(
-        error?.message,
-        '課題確認に失敗しました。',
-      );
-    } finally {
-      setButtonsDisabled(false);
-      downloadLectureButton.disabled = !currentPageContext?.lectureUrl;
-      downloadPageButton.disabled =
-        !Array.isArray(currentPageContext?.assetCandidates) ||
-        currentPageContext.assetCandidates.length === 0;
-    }
-  }
-
   async function handleDownloadCurrentPage() {
     if (currentTabId == null || !currentPageContext) return;
 
@@ -865,7 +742,6 @@
   }
 
   collectCourseButton.addEventListener('click', handleCollectCourse);
-  collectAssignmentsButton.addEventListener('click', handleCollectAssignments);
   downloadLectureButton.addEventListener('click', handleDownloadCurrentLecture);
   downloadPageButton.addEventListener('click', handleDownloadCurrentPage);
   openSettingsButton.addEventListener('click', handleOpenSettings);

@@ -11,7 +11,6 @@
 | type                                  | 送信元 | `message` 主フィールド | `sendResponse`                                                       |
 | ------------------------------------- | ------ | ---------------------- | -------------------------------------------------------------------- |
 | `glassmoocs:get-page-context`         | popup  | なし                   | `{ ok, context }` — `getCurrentPageContext(document, location.href)` |
-| `glassmoocs:collect-assignments`      | popup  | なし                   | `{ ok, result }` — 科目配下の課題ページと提出状態の推定結果          |
 | `glassmoocs:start-course-collection`  | popup  | なし                   | `{ ok, courseName, assetCount }` / `{ ok:false, error }`             |
 | `glassmoocs:download-current-lecture` | popup  | なし                   | 同上                                                                 |
 | `glassmoocs:download-current-page`    | popup  | なし                   | 同上                                                                 |
