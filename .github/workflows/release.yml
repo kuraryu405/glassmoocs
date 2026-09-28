@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release
+        run: pnpm run build:release
+
+      - name: Package browser zips
+        run: |
+          mkdir -p artifacts
+          rm -f artifacts/glassmoocs-chromium.zip artifacts/glassmoocs-firefox.zip
+          (cd dist/chromium && zip -qr ../../artifacts/glassmoocs-chromium.zip .)
+          (cd dist/firefox && zip -qr ../../artifacts/glassmoocs-firefox.zip .)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/glassmoocs-chromium.zip
+            artifacts/glassmoocs-firefox.zip
+          generate_release_notes: true
