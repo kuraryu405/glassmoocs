@@ -15,6 +15,10 @@
   const VALID_TAB_COLOR_MODES = new Set([MODE_FULL, MODE_BADGE, MODE_ICON]);
   const SUBMIT_RELOAD_WINDOW_MS = 15000;
   const SUBMIT_RELOAD_DELAY_MS = 180;
+  const FETCH_DOCUMENT_TIMEOUT_MS = 15000;
+  const ASSIGNMENT_COURSE_CONCURRENCY = 3;
+  const ASSIGNMENT_LECTURE_CONCURRENCY = 4;
+  const ASSIGNMENT_PAGE_CONCURRENCY = 4;
   const DEBUG_LOGS_ENABLED = __GLASSMOOCS_ENABLE_DEBUG_LOGS__;
   const DEFAULT_TAB_COLORS = {
     attendanceTest: '#f59e0b',
@@ -38,6 +42,7 @@
     openSlidesCapturePermissionWindow:
       'glassmoocs:open-slides-capture-permission-window',
     getPageContext: 'glassmoocs:get-page-context',
+    collectAssignments: 'glassmoocs:collect-assignments',
     startCourseCollection: 'glassmoocs:start-course-collection',
     downloadCurrentLecture: 'glassmoocs:download-current-lecture',
     downloadCurrentPage: 'glassmoocs:download-current-page',
@@ -125,6 +130,7 @@
   let settings = getDefaultSettings();
   let enhancementFrame = 0;
   let submitIntentAt = 0;
+  const assignmentScanCache = new Map();
   let reloadTimer = 0;
   const loggedAssetCandidateSignatures = new Set();
 
@@ -1132,9 +1138,30 @@
   }
 
   async function fetchDocument(rawUrl) {
-    const response = await fetch(rawUrl, {
-      credentials: 'include',
-    });
+    const controller =
+      typeof AbortController === 'function' ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => {
+          controller.abort();
+        }, FETCH_DOCUMENT_TIMEOUT_MS)
+      : 0;
+
+    let response;
+    try {
+      response = await fetch(rawUrl, {
+        credentials: 'include',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(`fetch timed out: ${FETCH_DOCUMENT_TIMEOUT_MS}ms`);
+      }
+      throw error;
+    } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`fetch failed: ${response.status}`);
@@ -1150,6 +1177,35 @@
       html,
       url: fetchedUrl,
     };
+  }
+
+  async function mapWithConcurrency(items, concurrency, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index], index);
+      }
+    }
+
+    const workerCount = Math.min(Math.max(1, concurrency), items.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, () => {
+        return worker();
+      }),
+    );
+
+    return results;
+  }
+
+  function isSameDocumentUrl(leftUrl, rightUrl) {
+    if (leftUrl === rightUrl) return true;
+    const left = canonicalizeAssetUrl(leftUrl);
+    const right = canonicalizeAssetUrl(rightUrl);
+    return !!left && left === right;
   }
 
   function dedupeByUrl(items) {
@@ -1503,6 +1559,28 @@
     return dedupeByUrl(entries);
   }
 
+  function extractCourseEntries(root, baseUrl) {
+    const entries = [];
+
+    [...root.querySelectorAll('a[href]')].forEach((anchor, index) => {
+      const url = resolveAbsoluteUrl(anchor.getAttribute('href'), baseUrl);
+      const urlInfo = parseMoocsUrl(url);
+      if (!urlInfo || urlInfo.pageType !== 'course') return;
+      const container = anchor.closest('.media-body, .box, .panel, .well, li');
+      const heading = normalizeText(
+        container?.querySelector('h1,h2,h3,h4,h5')?.textContent,
+      );
+
+      entries.push({
+        id: `course-${index + 1}`,
+        name: normalizeText(heading || anchor.textContent, urlInfo.courseSlug),
+        url,
+      });
+    });
+
+    return dedupeByUrl(entries);
+  }
+
   function extractLectureGroup(root) {
     return normalizeText(
       root.querySelector(
@@ -1552,6 +1630,1092 @@
       .filter((entry) => entry.url);
 
     return dedupeByUrl(pageEntries);
+  }
+
+  function isAssignmentLikeTitle(text) {
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized) return false;
+
+    return (
+      /出席\s*課題|課題|レポート|小テスト|理解度確認|確認テスト|テスト/.test(
+        normalized,
+      ) || /assignment|homework|report|quiz|test|submission/.test(normalized)
+    );
+  }
+
+  function getVisibleTextLines(root) {
+    const searchRoot = getAssetSearchRoot(root);
+    const text = searchRoot?.innerText || searchRoot?.textContent || '';
+    return text
+      .split(/\r?\n/)
+      .map((line) => normalizeText(line))
+      .filter(Boolean);
+  }
+
+  function extractAssignmentDueText(lines) {
+    const dueLine = lines.find((line) =>
+      /締切|期限|提出期間|受付期間|due|deadline/i.test(line),
+    );
+    const dueMatch = dueLine?.match(
+      /(締切|期限|提出期間|受付期間|due|deadline)[:：]?\s*.{0,48}/i,
+    );
+    if (dueMatch) {
+      return normalizeText(dueMatch[0]);
+    }
+
+    return normalizeText(dueLine);
+  }
+
+  const ANSWER_FIELD_SELECTORS = [
+    '.submission__answer__part__text__value textarea',
+    '.submission__answer__part__text__value input[type="text"]',
+    '.problem-container textarea',
+    '.problem-contentpage textarea',
+    'textarea[name*="answer" i]',
+    'textarea[name*="submission" i]',
+    'input[type="text"][name*="answer" i]',
+    'input[type="text"][name*="submission" i]',
+  ].join(',');
+
+  function getProblemBlocks(root) {
+    return [
+      ...root.querySelectorAll('.problem-container, .problem-contentpage'),
+    ];
+  }
+
+  function getProblemText(root) {
+    const blocks = getProblemBlocks(root);
+    if (!blocks.length) return '';
+    return blocks
+      .map((block) => normalizeText(block.innerText || block.textContent))
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function hasAnsweringUi(root) {
+    if (getProblemBlocks(root).length > 0) return true;
+    if (root.querySelector('input[type="file"]') !== null) return true;
+    if (root.querySelector(ANSWER_FIELD_SELECTORS) !== null) return true;
+    return [...root.querySelectorAll('button, input[type="submit"]')].some(
+      (node) =>
+        /問題を開く|提出|回答/i.test(
+          normalizeText(node.textContent || node.value),
+        ),
+    );
+  }
+
+  // NOTE: 空欄チェック(hasEmptySubmissionField)は廃止した。fetch した静的
+  // HTML では入力値が残らず常に空判定になり、提出済みを pending に反転させる。
+
+  function hasUnsubmittedFileField(root) {
+    const text = getVisibleTextLines(root).join(' ');
+    return (
+      root.querySelector('input[type="file"]') !== null &&
+      /ファイル.*(未提出|未選択|選択されていません|ありません)|添付.*(未提出|ありません)|no file chosen|file.*not submitted/i.test(
+        text,
+      )
+    );
+  }
+
+  function getAssignmentStatus(root) {
+    const lines = getVisibleTextLines(root);
+    const text = lines.join(' ');
+    const dueText = extractAssignmentDueText(lines);
+    // 問題ブロックがあるページでは、判定文言はブロック内に絞る。
+    // ページ全体で見るとナビ等の無関係な文言を拾って誤判定する。
+    const scopedText = getProblemText(root) || text;
+    const closedByBadge =
+      typeof root.querySelector === 'function' &&
+      root.querySelector('.problem-closed-only') !== null;
+    const unavailable =
+      closedByBadge ||
+      /受付終了|受け付けていません|受付.*していません|締切.*過ぎ|期限.*過ぎ|提出期限.*終了|終了しました|問題は非公開|[^a-z-]closed[^a-z-]|expired/i.test(
+        ` ${scopedText} `,
+      );
+    // 'unanswered' が 'answered' に部分一致するため先に除去する。
+    const submittedText = scopedText.replace(/unanswered/gi, '');
+    const submitted =
+      /提出済|提出しました|提出完了|回答済|解答済|送信済|採点済|submitted|answered/i.test(
+        submittedText,
+      ) || /あなたの得点\s*\d/i.test(scopedText);
+    // hasEmptySubmissionField は fetch した静的 HTML では常に空(入力は残らない)
+    // ため pending 根拠に使わない。提出済み頁を pending に反転させる原因になる。
+    const pending = hasUnsubmittedFileField(root);
+
+    if (unavailable) {
+      return { status: 'closed', dueText };
+    }
+    if (submitted && !pending) {
+      return { status: 'submitted', dueText };
+    }
+    // 回答欄は「問題を開く」後に AJAX で差し込まれるため、静的 HTML では
+    // 空欄が見つからないことが多い。回答 UI があり、受付中で、提出形跡が
+    // なければ出し忘れ候補として pending に寄せる。
+    if (pending || (hasAnsweringUi(root) && !submitted)) {
+      return { status: 'pending', dueText };
+    }
+    return { status: 'unknown', dueText };
+  }
+
+  function createAssignmentEntry(root, url, lectureEntry, pageTitle) {
+    const { status, dueText } = getAssignmentStatus(root);
+    return {
+      id: `${normalizeText(lectureEntry?.id, 'lecture')}::${normalizeText(url)}`,
+      status,
+      dueText,
+      lectureGroup: normalizeText(lectureEntry?.groupName),
+      lectureName: normalizeText(lectureEntry?.name, 'lecture'),
+      pageTitle: normalizeText(pageTitle, '課題'),
+      url: normalizeText(url),
+    };
+  }
+
+  async function collectLectureAssignments(lectureEntry) {
+    const lectureLabel = normalizeText(lectureEntry?.name, 'lecture');
+    if (!lectureEntry?.url) {
+      return {
+        assignments: [],
+        failures: [`${lectureLabel}: lecture URL missing`],
+      };
+    }
+
+    let lectureDocInfo;
+    try {
+      lectureDocInfo = await fetchDocument(lectureEntry.url);
+    } catch (error) {
+      return {
+        assignments: [],
+        failures: [
+          `${lectureLabel}: ${normalizeText(error?.message, 'fetch failed')}`,
+        ],
+      };
+    }
+
+    const pageEntries = extractPageEntries(
+      lectureDocInfo.document,
+      lectureDocInfo.url,
+      lectureEntry,
+    );
+    const assignments = [];
+    const failures = [];
+    const seenUrls = new Set();
+
+    // ページ取得は逐次だと講義あたりページ数分のレイテンシが積み上がるため、
+    // 講義内でも上限付き並列で回す。結果のマージはページ順に行い、
+    // 従来の逐次実行時と同じ順序・デデュープ結果になるようにする。
+    const pageResults = await mapWithConcurrency(
+      pageEntries,
+      ASSIGNMENT_PAGE_CONCURRENCY,
+      async (pageEntry) => {
+        const title = normalizeText(pageEntry.title);
+        let pageDocInfo = lectureDocInfo;
+        if (!isSameDocumentUrl(pageEntry.url, lectureDocInfo.url)) {
+          try {
+            pageDocInfo = await fetchDocument(pageEntry.url);
+          } catch (error) {
+            return {
+              failure: `${lectureLabel} / ${title}: ${normalizeText(
+                error?.message,
+                'page fetch failed',
+              )}`,
+            };
+          }
+        }
+
+        const rawTitle = normalizeText(
+          title ||
+            extractPageTitle(
+              pageDocInfo.document,
+              parseMoocsUrl(pageDocInfo.url),
+            ),
+          '',
+        );
+        const pageText = getVisibleTextLines(pageDocInfo.document).join(' ');
+        const answeringUi = hasAnsweringUi(pageDocInfo.document);
+        // ページ内ナビが「課題1」等へのリンクを含むため、本文キーワードのみでは
+        // 資料・ビデオページまで課題扱いになる。本文一致は回答 UI 併存時のみ採用し、
+        // タイトル不一致・UI なしは捨てる。表示用フォールバック'課題'は判定後に付ける。
+        const like =
+          isAssignmentLikeTitle(rawTitle) ||
+          (answeringUi && isAssignmentLikeTitle(pageText));
+        if (!like) return null;
+        const pageTitle = normalizeText(rawTitle, '課題');
+
+        return {
+          entry: createAssignmentEntry(
+            pageDocInfo.document,
+            pageDocInfo.url,
+            lectureEntry,
+            pageTitle,
+          ),
+        };
+      },
+    );
+
+    pageResults.forEach((pageResult) => {
+      if (!pageResult) return;
+      if (pageResult.failure) {
+        failures.push(pageResult.failure);
+        return;
+      }
+      const key = canonicalizeAssetUrl(pageResult.entry.url);
+      if (!key || seenUrls.has(key)) return;
+      seenUrls.add(key);
+      assignments.push(pageResult.entry);
+    });
+
+    return { assignments, failures };
+  }
+
+  async function collectCourseAssignments(
+    courseUrl,
+    fallbackCourseName = '',
+    options = {},
+  ) {
+    const courseDocInfo = await fetchDocument(courseUrl);
+    const courseName = normalizeText(
+      extractCourseName(
+        courseDocInfo.document,
+        parseMoocsUrl(courseDocInfo.url),
+      ),
+      normalizeText(fallbackCourseName, 'course'),
+    );
+    const lectureEntries = extractLectureEntries(
+      courseDocInfo.document,
+      courseDocInfo.url,
+    );
+
+    if (!lectureEntries.length) {
+      return {
+        courseName,
+        assignments: [],
+        failures: [`${courseName}: 科目配下の講義一覧を取得できませんでした。`],
+      };
+    }
+
+    const assignments = [];
+    const failures = [];
+    const seenUrls = new Set();
+
+    let completedLectures = 0;
+    const lectureResults = await mapWithConcurrency(
+      lectureEntries,
+      ASSIGNMENT_LECTURE_CONCURRENCY,
+      async (lectureEntry, index) => {
+        options.onProgress?.({
+          scope: 'course',
+          phase: 'lecture',
+          courseName,
+          currentName: normalizeText(lectureEntry.name, 'lecture'),
+          completed: completedLectures,
+          total: lectureEntries.length,
+          index,
+        });
+
+        // 1講義の想定外 throw で科目全体を abort させない。
+        let lectureResult;
+        try {
+          lectureResult = await collectLectureAssignments(lectureEntry);
+        } catch (error) {
+          lectureResult = {
+            assignments: [],
+            failures: [
+              `${normalizeText(lectureEntry.name, 'lecture')}: ${normalizeText(
+                error?.message,
+                'lecture scan failed',
+              )}`,
+            ],
+          };
+        }
+        completedLectures += 1;
+        options.onProgress?.({
+          scope: 'course',
+          phase: 'lecture',
+          courseName,
+          currentName: normalizeText(lectureEntry.name, 'lecture'),
+          completed: completedLectures,
+          total: lectureEntries.length,
+          index,
+        });
+        return lectureResult;
+      },
+    );
+
+    lectureResults.forEach((lectureResult) => {
+      failures.push(...lectureResult.failures);
+      lectureResult.assignments.forEach((entry) => {
+        const key = canonicalizeAssetUrl(entry.url);
+        if (!key || seenUrls.has(key)) return;
+        seenUrls.add(key);
+        assignments.push({
+          ...entry,
+          courseName,
+        });
+      });
+    });
+
+    return { courseName, assignments, failures };
+  }
+
+  async function collectCourseAssignmentsFromCurrentPage() {
+    const currentContext = getCurrentPageContext(
+      document,
+      window.location.href,
+    );
+    if (!currentContext?.courseUrl) {
+      throw new Error('科目ページを特定できませんでした。');
+    }
+
+    const { courseName, assignments, failures } =
+      await collectCourseAssignments(
+        currentContext.courseUrl,
+        currentContext.courseName,
+      );
+
+    return {
+      courseName,
+      assignmentCount: assignments.length,
+      pendingCount: assignments.filter((item) => item.status === 'pending')
+        .length,
+      assignments,
+      failures,
+    };
+  }
+
+  function getAssignmentStatusLabel(status) {
+    if (status === 'pending') return '出し忘れ';
+    if (status === 'submitted') return '提出済み';
+    if (status === 'closed') return '受付終了';
+    return '判定不明';
+  }
+
+  function getAssignmentPanelTitle(scope) {
+    if (scope === 'lecture') return 'この回の課題の出し忘れ';
+    if (scope === 'course') return 'この科目の課題の出し忘れ';
+    return '全体の課題の出し忘れ';
+  }
+
+  function getCurrentAssignmentScope() {
+    const currentContext = getCurrentPageContext(
+      document,
+      window.location.href,
+    );
+    if (currentContext?.lectureUrl) return 'lecture';
+    if (currentContext?.courseUrl) return 'course';
+    return 'site';
+  }
+
+  function formatAssignmentReminderSummary(result) {
+    if (!result) return 'まだ確認していません。';
+
+    const failures = Array.isArray(result.failures) ? result.failures : [];
+    const parts = [
+      `課題 ${Number(result.assignmentCount) || 0} 件`,
+      `出し忘れ ${Number(result.pendingCount) || 0} 件`,
+      failures.length ? `取得失敗 ${failures.length} 件` : '',
+    ].filter(Boolean);
+
+    return parts.join(' / ');
+  }
+
+  function formatAssignmentScanProgress(progress) {
+    if (!progress) return '課題を確認しています...';
+
+    const completed = Number(progress.completed) || 0;
+    const total = Number(progress.total) || 0;
+    const currentName = normalizeText(progress.currentName);
+    const base =
+      progress.scope === 'site'
+        ? `科目 ${Math.min(completed + 1, total)}/${total}`
+        : `講義 ${Math.min(completed + 1, total)}/${total}`;
+    const counts = [
+      Number(progress.assignmentCount)
+        ? `課題 ${Number(progress.assignmentCount)} 件`
+        : '',
+      Number(progress.pendingCount)
+        ? `出し忘れ ${Number(progress.pendingCount)} 件`
+        : '',
+      Number(progress.failureCount)
+        ? `失敗 ${Number(progress.failureCount)} 件`
+        : '',
+    ].filter(Boolean);
+
+    return [base, currentName, ...counts].filter(Boolean).join(' / ');
+  }
+
+  function renderAssignmentReminderPending(panel, progress = null) {
+    const titleNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-title',
+    );
+    const summaryNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-summary',
+    );
+    const bodyNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-body',
+    );
+    const actionButton = panel.querySelector(
+      '[data-glassmoocs-assignment-action="scan"]',
+    );
+
+    const nextTitle = getAssignmentPanelTitle(getCurrentAssignmentScope());
+    const nextSummary = progress
+      ? formatAssignmentScanProgress(progress)
+      : '科目一覧を取得しています...';
+    const renderSig = ['p', nextTitle, nextSummary].join('|');
+    if (panel.dataset.glassmoocsAssignmentRenderSig === renderSig) {
+      return;
+    }
+    panel.dataset.glassmoocsAssignmentRenderSig = renderSig;
+
+    setNodeText(titleNode, nextTitle);
+    setNodeText(summaryNode, nextSummary);
+    if (bodyNode) {
+      bodyNode.replaceChildren();
+    }
+    if (actionButton instanceof HTMLButtonElement) {
+      actionButton.disabled = true;
+      setNodeText(actionButton, '確認中...');
+    }
+  }
+
+  function createAssignmentReminderList(result) {
+    const list = document.createElement('ul');
+    list.className = 'glassmoocs-assignment-reminder-list';
+
+    const assignments = Array.isArray(result?.assignments)
+      ? result.assignments
+      : [];
+    const pending = assignments.filter((item) => item.status === 'pending');
+    const targetItems = pending;
+
+    if (!targetItems.length) {
+      const item = document.createElement('li');
+      item.className = 'glassmoocs-assignment-reminder-empty';
+      item.textContent = assignments.length
+        ? '今のところ出し忘れっぽい課題はありません。'
+        : '課題ページは見つかりませんでした。';
+      list.append(item);
+      return list;
+    }
+
+    targetItems.slice(0, 8).forEach((assignment) => {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = assignment.url;
+      link.textContent = [
+        assignment.courseName,
+        assignment.lectureName,
+        assignment.pageTitle,
+      ]
+        .filter(Boolean)
+        .join(' / ');
+
+      const meta = document.createElement('span');
+      meta.className = 'glassmoocs-assignment-reminder-meta';
+      meta.textContent = [
+        getAssignmentStatusLabel(assignment.status),
+        assignment.dueText,
+      ]
+        .filter(Boolean)
+        .join(' - ');
+
+      item.append(link, meta);
+      list.append(item);
+    });
+
+    if (targetItems.length > 8) {
+      const item = document.createElement('li');
+      item.className = 'glassmoocs-assignment-reminder-empty';
+      item.textContent = `他 ${targetItems.length - 8} 件`;
+      list.append(item);
+    }
+
+    return list;
+  }
+
+  function getAssignmentReminderAnchor() {
+    const contentHeader = document.querySelector('.content-header');
+    if (contentHeader) {
+      return {
+        node: contentHeader,
+        placement: 'afterend',
+      };
+    }
+
+    const contentWrapper = document.querySelector('.content-wrapper');
+    if (contentWrapper) {
+      return {
+        node: contentWrapper,
+        placement: 'prepend',
+      };
+    }
+
+    return {
+      node: document.body,
+      placement: 'prepend',
+    };
+  }
+
+  function setNodeText(node, text) {
+    if (node instanceof HTMLElement && node.textContent !== text) {
+      node.textContent = text;
+    }
+  }
+
+  function mountAssignmentReminderPanel(panel) {
+    const { node, placement } = getAssignmentReminderAnchor();
+    // DL パネルと正位置を共有しない。header 直後は assignment 固定、
+    // その他は assignment → download の順で並べ、奪い合いを収束させる。
+    if (!node || (placement !== 'prepend' && !node.parentElement)) {
+      insertAssignmentPanelFirst(document.body, panel);
+      return;
+    }
+
+    // 既に正位置なら移動しない。無条件の insert は childList mutation となり
+    // MutationObserver → enhancePage() の自己ループを駆動するため。
+    if (placement === 'afterend') {
+      if (node.nextElementSibling !== panel) {
+        node.insertAdjacentElement('afterend', panel);
+      }
+      return;
+    }
+
+    insertAssignmentPanelFirst(node, panel);
+  }
+
+  function insertAssignmentPanelFirst(container, panel) {
+    if (!(container instanceof Element)) return;
+    const downloadPanel = container.querySelector(
+      ':scope > .glassmoocs-download-panel',
+    );
+    if (downloadPanel) {
+      if (downloadPanel.previousElementSibling !== panel) {
+        container.insertBefore(panel, downloadPanel);
+      }
+      return;
+    }
+    if (container.firstElementChild !== panel) {
+      container.prepend(panel);
+    }
+  }
+
+  function renderAssignmentReminderPanel(panel, result, error = null) {
+    const titleNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-title',
+    );
+    const summaryNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-summary',
+    );
+    const bodyNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-body',
+    );
+    const actionButton = panel.querySelector(
+      '[data-glassmoocs-assignment-action="scan"]',
+    );
+
+    const nextTitle = getAssignmentPanelTitle(
+      result?.scope || getCurrentAssignmentScope(),
+    );
+    const nextSummary = error
+      ? normalizeText(error?.message, '課題の確認に失敗しました。')
+      : formatAssignmentReminderSummary(result);
+    const nextButtonLabel = result ? 'もう一度確認' : '課題を確認';
+    const shownUrls = Array.isArray(result?.assignments)
+      ? result.assignments
+          .filter((item) => item.status === 'pending')
+          .slice(0, 8)
+          .map((item) => normalizeText(item.url))
+          .join(',')
+      : '';
+    const renderSig = [
+      'r',
+      nextTitle,
+      nextSummary,
+      error ? normalizeText(error?.message) : '',
+      Array.isArray(result?.assignments) ? result.assignments.length : -1,
+      Number(result?.pendingCount) || 0,
+      nextButtonLabel,
+      shownUrls,
+    ].join('|');
+    // 同一内容での再描画は childList mutation になるため skip する。
+    if (panel.dataset.glassmoocsAssignmentRenderSig === renderSig) {
+      return;
+    }
+    panel.dataset.glassmoocsAssignmentRenderSig = renderSig;
+
+    setNodeText(titleNode, nextTitle);
+    setNodeText(summaryNode, nextSummary);
+    if (bodyNode) {
+      if (error) {
+        bodyNode.replaceChildren(
+          document.createTextNode(
+            'ページを再読み込みしてもう一度確認してください。',
+          ),
+        );
+      } else if (result) {
+        bodyNode.replaceChildren(createAssignmentReminderList(result));
+      } else {
+        bodyNode.replaceChildren();
+      }
+    }
+    if (actionButton instanceof HTMLButtonElement) {
+      actionButton.disabled = false;
+      setNodeText(actionButton, nextButtonLabel);
+    }
+  }
+
+  function createAssignmentReminderPanel() {
+    const panel = document.createElement('section');
+    panel.className = 'glassmoocs-assignment-reminder-panel';
+    panel.dataset.glassmoocsAssignmentReminder = 'true';
+    panel.innerHTML = `
+      <div>
+        <p class="glassmoocs-assignment-reminder-eyebrow">GlassMOOCs Assignments</p>
+        <h2 class="glassmoocs-assignment-reminder-title">課題の出し忘れ</h2>
+        <p class="glassmoocs-assignment-reminder-summary">まだ確認していません。</p>
+      </div>
+      <div class="glassmoocs-assignment-reminder-actions">
+        <button type="button" class="glassmoocs-assignment-reminder-button" data-glassmoocs-assignment-action="scan">課題を確認</button>
+      </div>
+      <div class="glassmoocs-assignment-reminder-body"></div>
+    `;
+    attachAssignmentReminderPanelListeners(panel);
+    return panel;
+  }
+
+  function attachAssignmentReminderPanelListeners(panel) {
+    if (panel.dataset.glassmoocsAssignmentReminderReady === 'true') {
+      return;
+    }
+
+    panel.dataset.glassmoocsAssignmentReminderReady = 'true';
+    const scanButton = panel.querySelector(
+      '[data-glassmoocs-assignment-action="scan"]',
+    );
+    if (scanButton instanceof HTMLButtonElement) {
+      // boot 骨組みは listener が付くまで disabled のままにしておく。
+      scanButton.disabled = false;
+      scanButton.addEventListener('click', () => {
+        startAssignmentReminderScan(panel);
+      });
+    }
+    // 科目一覧(/courses)では科目ごとの確認ボタンと「戻る」を委譲で受ける。
+    panel.addEventListener('click', (event) => {
+      const courseButton = event.target?.closest?.(
+        '[data-glassmoocs-course-scan-url]',
+      );
+      if (
+        courseButton instanceof HTMLButtonElement &&
+        panel.contains(courseButton) &&
+        !courseButton.disabled
+      ) {
+        event.preventDefault();
+        startCourseAssignmentScan(
+          panel,
+          normalizeText(courseButton.dataset.glassmoocsCourseScanUrl),
+          normalizeText(
+            courseButton.dataset.glassmoocsCourseScanName,
+            'course',
+          ),
+        );
+        return;
+      }
+      const backButton = event.target?.closest?.(
+        '[data-glassmoocs-assignment-action="back"]',
+      );
+      if (
+        backButton instanceof HTMLButtonElement &&
+        panel.contains(backButton)
+      ) {
+        event.preventDefault();
+        activeSiteCourseScanKey = '';
+        renderSiteCourseList(panel);
+      }
+    });
+  }
+
+  // 全体一括スキャン中に enhancePage() が再実行されても UI を壊さないための追跡。
+  let activeSiteCourseScanKey = '';
+
+  function setSiteScanActionVisible(panel, visible) {
+    const actionsNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-actions',
+    );
+    if (actionsNode instanceof HTMLElement) {
+      actionsNode.style.display = visible ? '' : 'none';
+    }
+  }
+
+  function renderSiteCourseList(panel) {
+    const titleNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-title',
+    );
+    const summaryNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-summary',
+    );
+    const bodyNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-body',
+    );
+    setNodeText(titleNode, '全体の課題の出し忘れ');
+    setNodeText(summaryNode, '確認したい科目を選んでください。');
+    // 全体一括スキャンは科目数×講義数×ページ数の fetch になるため置かない。
+    setSiteScanActionVisible(panel, false);
+    if (!(bodyNode instanceof HTMLElement)) return;
+    const courses = extractCourseEntries(document, window.location.href);
+    const listSig = ['s', ...courses.map((course) => course.url)].join('|');
+    // 同一科目一覧での再構築はボタンの作り直し(フォーカス喪失・クリック不発)
+    // になるため skip する。
+    if (panel.dataset.glassmoocsAssignmentRenderSig === listSig) {
+      return;
+    }
+    panel.dataset.glassmoocsAssignmentRenderSig = listSig;
+    bodyNode.replaceChildren();
+    if (!courses.length) {
+      bodyNode.textContent = '科目一覧を取得できませんでした。';
+      return;
+    }
+    const list = document.createElement('ul');
+    list.className = 'glassmoocs-assignment-reminder-list';
+    courses.forEach((course) => {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = normalizeText(course.name, 'course');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'glassmoocs-assignment-reminder-button';
+      button.dataset.glassmoocsCourseScanUrl = course.url;
+      button.dataset.glassmoocsCourseScanName = normalizeText(
+        course.name,
+        'course',
+      );
+      button.textContent = '確認';
+      item.append(label, document.createTextNode(' '), button);
+      list.append(item);
+    });
+    bodyNode.append(list);
+  }
+
+  function appendSiteBackButton(panel) {
+    const actionsNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-actions',
+    );
+    if (!(actionsNode instanceof HTMLElement)) return;
+    actionsNode.style.display = '';
+    let back = actionsNode.querySelector(
+      '[data-glassmoocs-assignment-action="back"]',
+    );
+    if (!(back instanceof HTMLButtonElement)) {
+      back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'glassmoocs-assignment-reminder-button';
+      back.dataset.glassmoocsAssignmentAction = 'back';
+      back.textContent = '科目一覧に戻る';
+      actionsNode.append(back);
+    }
+    back.hidden = false;
+  }
+
+  function startCourseAssignmentScan(panel, courseUrl, courseName) {
+    if (!courseUrl) return;
+    // URL 正規化なしでは末尾スラッシュ違いで別キーになる。
+    const cacheKey = `course::${canonicalizeAssetUrl(courseUrl) || courseUrl}`;
+    trimAssignmentScanCache(cacheKey);
+    activeSiteCourseScanKey = cacheKey;
+    assignmentScanCache.set(cacheKey, {
+      status: 'pending',
+      result: null,
+      progress: null,
+    });
+    const summaryNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-summary',
+    );
+    const bodyNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-body',
+    );
+    setSiteScanActionVisible(panel, false);
+    if (summaryNode) {
+      summaryNode.textContent = `${courseName} を確認しています...`;
+    }
+    if (bodyNode instanceof HTMLElement) {
+      bodyNode.replaceChildren();
+    }
+    collectCourseAssignments(courseUrl, courseName, {
+      onProgress(progress) {
+        // 別科目スキャンに切り替わっていたら stale なので描画しない。
+        if (activeSiteCourseScanKey !== cacheKey) return;
+        assignmentScanCache.set(cacheKey, {
+          status: 'pending',
+          result: null,
+          progress,
+        });
+        setNodeText(summaryNode, formatAssignmentScanProgress(progress));
+      },
+    })
+      .then((result) => {
+        if (activeSiteCourseScanKey !== cacheKey) return;
+        // collectCourseAssignments の戻りには件数サマリが無いため補う。
+        const assignments = Array.isArray(result?.assignments)
+          ? result.assignments
+          : [];
+        const fullResult = {
+          ...result,
+          assignments,
+          assignmentCount: assignments.length,
+          pendingCount: assignments.filter((item) => item.status === 'pending')
+            .length,
+        };
+        // キーは残す: enhancePage() 再実行時に結果表示を復元するため。
+        // 「戻る」でだけクリアする。
+        assignmentScanCache.set(cacheKey, {
+          status: 'done',
+          result: fullResult,
+        });
+        renderAssignmentReminderPanel(panel, fullResult);
+        appendSiteBackButton(panel);
+      })
+      .catch((error) => {
+        if (activeSiteCourseScanKey !== cacheKey) return;
+        assignmentScanCache.set(cacheKey, { status: 'failed', error });
+        renderAssignmentReminderPanel(panel, null, error);
+        appendSiteBackButton(panel);
+      });
+  }
+
+  const ASSIGNMENT_SCAN_CACHE_LIMIT = 50;
+
+  function trimAssignmentScanCache(keepKey = '') {
+    while (assignmentScanCache.size >= ASSIGNMENT_SCAN_CACHE_LIMIT) {
+      const oldestKey = assignmentScanCache.keys().next().value;
+      if (oldestKey === undefined || oldestKey === keepKey) break;
+      assignmentScanCache.delete(oldestKey);
+    }
+  }
+
+  function getAssignmentScanCacheKey() {
+    const url = new URL(window.location.href);
+    url.hash = '';
+    return url.toString();
+  }
+
+  function injectAssignmentReminderPanel() {
+    let panel = document.querySelector('.glassmoocs-assignment-reminder-panel');
+    if (!panel) {
+      panel = createAssignmentReminderPanel();
+    }
+    attachAssignmentReminderPanelListeners(panel);
+
+    mountAssignmentReminderPanel(panel);
+
+    if (getCurrentAssignmentScope() === 'site') {
+      const active = activeSiteCourseScanKey
+        ? assignmentScanCache.get(activeSiteCourseScanKey)
+        : null;
+      if (active?.status === 'pending') {
+        renderAssignmentReminderPending(panel, active.progress);
+        setSiteScanActionVisible(panel, false);
+        return;
+      }
+      if (active?.status === 'done') {
+        renderAssignmentReminderPanel(panel, active.result);
+        appendSiteBackButton(panel);
+        return;
+      }
+      if (active?.status === 'failed') {
+        renderAssignmentReminderPanel(panel, null, active.error);
+        appendSiteBackButton(panel);
+        return;
+      }
+      renderSiteCourseList(panel);
+      return;
+    }
+
+    const cacheKey = getAssignmentScanCacheKey();
+    const cached = assignmentScanCache.get(cacheKey);
+    if (cached?.status === 'done') {
+      renderAssignmentReminderPanel(panel, cached.result);
+      return;
+    }
+    if (cached?.status === 'failed') {
+      renderAssignmentReminderPanel(panel, null, cached.error);
+      return;
+    }
+    if (cached?.status === 'pending') {
+      renderAssignmentReminderPending(panel, cached.progress);
+      return;
+    }
+
+    renderAssignmentReminderPanel(panel, null);
+  }
+
+  function startAssignmentReminderScan(panel) {
+    const cacheKey = getAssignmentScanCacheKey();
+    trimAssignmentScanCache(cacheKey);
+    assignmentScanCache.set(cacheKey, {
+      status: 'pending',
+      result: null,
+      progress: null,
+    });
+    const summaryNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-summary',
+    );
+    const bodyNode = panel.querySelector(
+      '.glassmoocs-assignment-reminder-body',
+    );
+    const actionButton = panel.querySelector(
+      '[data-glassmoocs-assignment-action="scan"]',
+    );
+
+    if (summaryNode) {
+      summaryNode.textContent = '科目一覧を取得しています...';
+    }
+    if (bodyNode) {
+      bodyNode.textContent = '';
+    }
+    if (actionButton instanceof HTMLButtonElement) {
+      actionButton.disabled = true;
+      actionButton.textContent = '確認中...';
+    }
+
+    collectAssignmentOverviewFromCurrentPage({
+      onProgress(progress) {
+        assignmentScanCache.set(cacheKey, {
+          status: 'pending',
+          result: null,
+          progress,
+        });
+        if (summaryNode) {
+          summaryNode.textContent = formatAssignmentScanProgress(progress);
+        }
+      },
+    })
+      .then((result) => {
+        assignmentScanCache.set(cacheKey, { status: 'done', result });
+        renderAssignmentReminderPanel(panel, result);
+      })
+      .catch((error) => {
+        assignmentScanCache.set(cacheKey, { status: 'failed', error });
+        renderAssignmentReminderPanel(panel, null, error);
+      });
+  }
+
+  async function collectAssignmentOverviewFromCurrentPage(options = {}) {
+    const currentContext = getCurrentPageContext(
+      document,
+      window.location.href,
+    );
+    let scope = 'site';
+    let courseName = '';
+    const assignments = [];
+    const failures = [];
+
+    if (currentContext?.lectureUrl) {
+      scope = 'lecture';
+      courseName = normalizeText(currentContext.courseName);
+      const result = await collectLectureAssignments({
+        id: `lecture-current-${normalizeText(currentContext.lectureUrl)}`,
+        groupName: normalizeText(currentContext.lectureGroup),
+        name: normalizeText(currentContext.lectureName, 'lecture'),
+        url: currentContext.lectureUrl,
+      });
+      assignments.push(
+        ...result.assignments.map((entry) => ({
+          ...entry,
+          courseName,
+        })),
+      );
+      failures.push(...result.failures);
+    } else if (currentContext?.courseUrl) {
+      scope = 'course';
+      const result = await collectCourseAssignments(
+        currentContext.courseUrl,
+        currentContext.courseName,
+        options,
+      );
+      courseName = result.courseName;
+      assignments.push(...result.assignments);
+      failures.push(...result.failures);
+    } else {
+      const courseEntries = extractCourseEntries(
+        document,
+        window.location.href,
+      );
+      if (!courseEntries.length) {
+        throw new Error('科目一覧を取得できませんでした。');
+      }
+
+      let completedCourses = 0;
+      options.onProgress?.({
+        scope: 'site',
+        phase: 'course-list',
+        currentName: `科目一覧 ${courseEntries.length} 件`,
+        completed: 0,
+        total: courseEntries.length,
+        assignmentCount: 0,
+        pendingCount: 0,
+        failureCount: 0,
+      });
+      await mapWithConcurrency(
+        courseEntries,
+        ASSIGNMENT_COURSE_CONCURRENCY,
+        async (courseEntry, index) => {
+          options.onProgress?.({
+            scope: 'site',
+            phase: 'course',
+            currentName: normalizeText(courseEntry.name, 'course'),
+            completed: completedCourses,
+            total: courseEntries.length,
+            index,
+            assignmentCount: assignments.length,
+            pendingCount: assignments.filter(
+              (item) => item.status === 'pending',
+            ).length,
+            failureCount: failures.length,
+          });
+
+          try {
+            const result = await collectCourseAssignments(
+              courseEntry.url,
+              courseEntry.name,
+            );
+            assignments.push(...result.assignments);
+            failures.push(...result.failures);
+          } catch (error) {
+            failures.push(
+              `${normalizeText(courseEntry.name, 'course')}: ${normalizeText(
+                error?.message,
+                'course fetch failed',
+              )}`,
+            );
+          } finally {
+            completedCourses += 1;
+            options.onProgress?.({
+              scope: 'site',
+              phase: 'course',
+              currentName: normalizeText(courseEntry.name, 'course'),
+              completed: completedCourses,
+              total: courseEntries.length,
+              index,
+              assignmentCount: assignments.length,
+              pendingCount: assignments.filter(
+                (item) => item.status === 'pending',
+              ).length,
+              failureCount: failures.length,
+            });
+          }
+        },
+      );
+    }
+
+    const pending = assignments.filter((item) => item.status === 'pending');
+
+    return {
+      scope,
+      courseName,
+      assignmentCount: assignments.length,
+      pendingCount: pending.length,
+      assignments,
+      failures,
+    };
   }
 
   function getCurrentPageContext(root, rawUrl) {
@@ -1886,7 +3050,7 @@
 
       let pageDocInfo = lectureDocInfo;
 
-      if (pageEntry.url !== lectureDocInfo.url) {
+      if (!isSameDocumentUrl(pageEntry.url, lectureDocInfo.url)) {
         try {
           pageDocInfo = await fetchDocument(pageEntry.url);
         } catch (error) {
@@ -2127,25 +3291,47 @@
     return !!state?.needsCapturePermission;
   }
 
+  const downloadPanelFactory =
+    globalThis.__glassmoocsCreateDownloadPanelComponent;
   const downloadPanelComponent =
-    globalThis.__glassmoocsCreateDownloadPanelComponent({
-      AGENT_LOG_HYPOTHESES: DEBUG_LOGS_ENABLED ? AGENT_LOG_HYPOTHESES : {},
-      DOWNLOAD_STATUS,
-      buildCurrentPageDownloadPayload,
-      createDebugLogContext,
-      collectCourseAssetsFromCurrentPage,
-      collectLectureAssetsFromCurrentPage,
-      formatDownloadStateText,
-      getDownloadProgress,
-      getCurrentPageContext,
-      getDownloadState,
-      getSlidesCapturePermissionState,
-      normalizeText,
-      openSlidesCapturePermissionWindow,
-      pageNeedsSlidesCapturePermission,
-      postAgentLog,
-      requestBackgroundDownload,
-    });
+    typeof downloadPanelFactory === 'function'
+      ? downloadPanelFactory({
+          AGENT_LOG_HYPOTHESES: DEBUG_LOGS_ENABLED ? AGENT_LOG_HYPOTHESES : {},
+          DOWNLOAD_STATUS,
+          buildCurrentPageDownloadPayload,
+          createDebugLogContext,
+          collectCourseAssetsFromCurrentPage,
+          collectLectureAssetsFromCurrentPage,
+          formatDownloadStateText,
+          getDownloadProgress,
+          getCurrentPageContext,
+          getDownloadState,
+          getSlidesCapturePermissionState,
+          normalizeText,
+          openSlidesCapturePermissionWindow,
+          pageNeedsSlidesCapturePermission,
+          postAgentLog,
+          requestBackgroundDownload,
+        })
+      : {
+          handleCourseCollectionRequest() {
+            return Promise.reject(
+              new Error('資料保存パネルの初期化に失敗しました。'),
+            );
+          },
+          handleLectureDownloadRequest() {
+            return Promise.reject(
+              new Error('資料保存パネルの初期化に失敗しました。'),
+            );
+          },
+          handleCurrentPageDownloadRequest() {
+            return Promise.reject(
+              new Error('資料保存パネルの初期化に失敗しました。'),
+            );
+          },
+          injectDownloadControls() {},
+          scheduleDownloadPanelRefresh() {},
+        };
 
   const {
     handleCourseCollectionRequest,
@@ -2243,6 +3429,23 @@
       return false;
     }
 
+    if (type === MESSAGE_TYPES.collectAssignments) {
+      collectCourseAssignmentsFromCurrentPage()
+        .then((result) =>
+          sendResponse({
+            ok: true,
+            result,
+          }),
+        )
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: normalizeText(error?.message, 'assignment scan failed'),
+          }),
+        );
+      return true;
+    }
+
     if (type === MESSAGE_TYPES.startCourseCollection) {
       handleCourseCollectionRequest()
         .then((result) =>
@@ -2304,6 +3507,7 @@
   function enhancePage() {
     attachTextareaEnhancements();
     decorateTabs();
+    injectAssignmentReminderPanel();
     injectDownloadControls();
   }
 
@@ -2317,6 +3521,8 @@
   }
 
   function init() {
+    injectAssignmentReminderPanel();
+
     readSettings((loadedSettings) => {
       settings = loadedSettings;
       enhancePage();

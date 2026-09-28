@@ -101,6 +101,30 @@ glassmoocs-flow-1777522397563-mk3mkd
 - `using html image rasterization for firefox`: 1
 - `status: done`
 
+## 課題一覧スキャン
+
+2026-05-31 に popup へ「未提出課題を確認」を追加した。
+
+- [`public/content.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/content.js) の `glassmoocs:collect-assignments` が、科目配下の講義・ページを fetch して課題っぽいページを抽出する
+- 判定は DOM 内テキストのヒューリスティックで、`未提出` / 提出ボタン系は `pending`、`提出済` 系は `submitted`、締切終了系は `closed`
+- MOOCs ページ内にも自動表示する。`/courses` では全体、講義・資料ページではその回、科目ページではその科目の出し忘れを表示する
+- 出し忘れ判定には、空の提出 textarea / text input と file input / ファイル未提出表示も含める
+- サーバー側の専用 API ではなく、ログイン済みユーザーが MOOCs 上で見えるページだけを読む
+- 実ページごとに表記揺れがあり得るため、判定不明は popup に残して追加パターンを拾えるようにしている
+- 2026-09-28 に Dia + テストプロファイル(CDP)で実機検証した。判明した事実:
+  - 旧ロジックはキーワードをページ全文で見るため、ページ内ナビの「課題1」リンクで資料・ビデオ頁まで課題扱いになっていた
+  - 回答欄は「問題を開く」後に AJAX で差し込まれるため、静的 HTML では空欄が見つからず `pending` に到達不能だった
+  - 対策: 課題らしさに回答 UI(`.problem-container` / `.problem-contentpage` / file input / 解答欄 / 提出ボタン)の有無を必須条件化、状態判定の文言探索を問題ブロック内に限定、受付中+未提出+UI ありは `pending` に寄せる。`未提出`系文言に `非公開`、提出済み系に数値付き `得点` を追加
+  - COT201(31 講義/約 350 頁)で検証: 検出 230 件すべて `closed`、`pending` 0。学期終了後のため closed は妥当。`問1〜問4` など旧ロジックで拾えなかった頁も拾うようになった
+  - `pending` / `submitted` の live 検証は未了(受付中の課題が見つからなかった)。受付中科目が出たら再検証すること
+- `/courses` の全体一括スキャンを廃止し、科目別確認ボタンに置き換えた。全体は科目数×講義数×頁数の fetch になるため。講義内ページ取得は `ASSIGNMENT_PAGE_CONCURRENCY = 4` で並列化済み
+- 2026-09-28 に 4 領域並列で厳密監査し、P0/P1 を中心に修正した(`pnpm run ci` 通過):
+  - content: パネル mount 冪等化+配置順固定(header,A,D)で rAF 自己ループと順序反転を停止、render の同一内容スキップ、タイトルフォールバック'課題'の like 汚染除去、判定文言の問題ブロック限定+`unanswered`除外+得点数値化+`closed-caption`除外、fetch 文書の空欄 pending 廃止、講義 mapper の try/catch、科目スキャンの stale ガード+cache 上限、boot ボタンのデッドタイム解消、DL パネル回復注入に download-panel 追加、popup の科目一覧での課題ボタン無効化+取得リトライ+表示世代管理
+  - background: 前面化タブ割り込みの Chromium 除外(Chromium の rasterize は前面が前提のため毎回自殺していた)、getState の副作用分離、状態書き込みの一本化、リセット後のゾンビ書き込み防止、権限フラグの OR 蓄積、孤児 Slides タブの始末、DL 完了待ちの初回空結果耐性、Firefox 描画の二段フォールバック、起動競合の startupReady、capture 前の前面化
+  - slides/popup/build: stale スナップショット受理の廃止、画像等のタイムアウト付与、worker 例外の吸収、canvas 上限、factory ガード(popup/slides-export)、権限カードのウィンドウ経由化+永続化、許可文言修正、goToSlide の方向再評価、画像 fetch の allowlist、SCRIPT_FILES 追加分、デバッグマクロ残留のビルド失敗化
+  - 盲目 innerHTML 置換は削除した(対象が Preact 本体のため)。src/ で innerHTML を使わない運用で対応する
+- 未対応(P2 として報告のみ): Chrome SW の大 PDF blob 寿命、storage エラーの握り潰し、同一名ファイルの overwrite、上書き競合の uniquify 化、capture 権限の実行中 revoke 検出、root dist/ の stale ミラー、version 二重管理
+
 ---
 
 ## 次に詰めるべき箇所
