@@ -25,7 +25,6 @@ const SCRIPT_FILES = [
   'page-bridge.js',
   'popup.js',
   'popup/slides-permission-card.js',
-  'popup-launcher.js',
   'slides-export.js',
   'slides-export/svg-export.js',
   'slides-permission.js',
