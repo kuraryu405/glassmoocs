@@ -2218,7 +2218,11 @@
         },
         AGENT_LOG_HYPOTHESES.pdf,
       );
-      throw error;
+      // release build ではログ基盤がないため、次回切り分け用に寸法を載せて投げ直す。
+      // (code 付きエラーではないため queueDownloads の権限導線には影響しない)
+      throw new Error(
+        `${normalizeText(error?.message, 'slide rasterization failed')} (svg ${svgText.length} chars, request ${requestedWidth}x${requestedHeight}, target ${targetWidth}x${targetHeight})`,
+      );
     } finally {
       postAgentLog(
         'background.js:renderSerializedSlidePage',
@@ -2456,19 +2460,29 @@
   // 追加許可なしで capture 可能。Firefox の capture は `<all_urls>` を要する
   // 場合があるため、そちらは従来通り要求する。
   async function hasCapturePermission() {
-    if (
-      await permissionsContains({
-        origins: [CAPTURE_PERMISSION_FALLBACK_ORIGIN],
-      })
-    ) {
-      return true;
-    }
-    if (isFirefoxLike()) {
-      return false;
-    }
-    return await permissionsContains({
-      origins: [CAPTURE_PERMISSION_ORIGIN],
+    const fallbackGranted = await permissionsContains({
+      origins: [CAPTURE_PERMISSION_FALLBACK_ORIGIN],
     });
+    const firefoxLike = isFirefoxLike();
+    // Firefox では docs origin の判定を省く (capture に `<all_urls>` を要するため)。
+    const originGranted = firefoxLike
+      ? false
+      : await permissionsContains({
+          origins: [CAPTURE_PERMISSION_ORIGIN],
+        });
+    const granted = fallbackGranted || originGranted;
+    postAgentLog(
+      'background.js:hasCapturePermission',
+      'capture permission gate evaluated',
+      {
+        fallbackGranted,
+        firefoxLike,
+        originGranted,
+        granted,
+      },
+      AGENT_LOG_HYPOTHESES.capture,
+    );
+    return granted;
   }
 
   async function processSlidesDownloadByCapture(

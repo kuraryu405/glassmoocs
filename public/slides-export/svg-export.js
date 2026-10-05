@@ -303,6 +303,24 @@
       const dimensions = getSvgDimensions(svg);
       const rect = svg.getBoundingClientRect();
 
+      // createImageBitmap は内在寸法 (width/height 属性) のない SVG Blob を
+      // "The source image could not be decoded." で拒否する仕様のため、
+      // 計測寸法を属性として刻む。Image 経由のラスタライズにも同じ寸法が使われる。
+      const intrinsicWidth = Math.max(
+        1,
+        Math.round(rect.width || dimensions.viewBoxWidth || 0),
+      );
+      const intrinsicHeight = Math.max(
+        1,
+        Math.round(rect.height || dimensions.viewBoxHeight || 0),
+      );
+      if (Number.isFinite(intrinsicWidth) && intrinsicWidth > 0) {
+        cloned.setAttribute('width', String(intrinsicWidth));
+      }
+      if (Number.isFinite(intrinsicHeight) && intrinsicHeight > 0) {
+        cloned.setAttribute('height', String(intrinsicHeight));
+      }
+
       const result = {
         svgText: new XMLSerializer().serializeToString(cloned),
         renderWidth: rect.width || dimensions.viewBoxWidth || 0,
