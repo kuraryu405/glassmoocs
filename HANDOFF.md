@@ -255,6 +255,7 @@ glassmoocs-flow-1777522397563-mk3mkd
   - 作成直後、ユーザーが移動済みでない場合のみ `windowsUpdate(mainWindowId, { focused:true })` で即時復帰。終了時復元も `lastFocusedWindow` 基準に改善 (別所へ移動済みなら復元しない)
   - `queueDownloads` で `slidesWindowSession` を共有 (Firefox は null のまま従来通り)。後始末は queue finally / reset の tracked set に一本化
 - **追記**: refocus が読み込み完了後だったため数秒間 Slides 画面を見せていた。`refocusAwayFromTab` を作成直後 (load 前) に移動 + ラスタ失敗メッセージに `firefoxLike:` フラグを追加 (Dia の判定状態を切り分け用)
+- **追記2**: macOS の遅延 steal に備え、新ウィンドウ自体の `windowsUpdate(focused:false)` + 元ウィンドウ復帰を作成直後と読み込み完了後の 2 回実施 (`pushSlidesWindowBehind`)。version を 1.0.7 に上げ、Dia 上で更新適用の確認ができるようにした
 - 次の実機確認: 保存開始時の一瞬のちらつき以外は MOOCs ページに留まること
 
 ---
