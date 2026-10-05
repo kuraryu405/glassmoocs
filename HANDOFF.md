@@ -223,6 +223,7 @@ glassmoocs-flow-1777522397563-mk3mkd
 - 次の実機確認: 新ビルド (`dist/chromium` 再生成済み) + 拡張機能の再読み込み + MOOCs ページ再読み込みで 11 件が完走するか。失敗時はエラーメッセージ全文をもらう
 
 ## Dia 環境での Firefox 誤検出 (2026-10-05)
+
 - ユーザー環境は Dia (Chromium 系)。権限エラー + `createImageBitmap` デコード失敗 + Image フォールバック失敗の三重苦は、`isFirefoxLike()` が Dia で true を返していたことで全て説明がつく (Firefox 経路: タブ非活性・background ラスタ・ゲート不通過)
 - `browser` 名前空間の有無だけでは Chromium 派生での誤検出があり得るため、`navigator.userAgentData.brands` (Chromium 系のみ存在。SW 含む) があれば Chromium と判定する順に変更。素の Firefox (brands なし) の挙動は不変
 - これで Dia ではタブラスタライズ→background bitmap (内在寸法付きで可) →capture (無許可) の三段が全て Chromium 経路で動く
@@ -232,11 +233,19 @@ glassmoocs-flow-1777522397563-mk3mkd
 
 - 寸法修正で 11 件中 7 件が完走 (`partial_failed`, 完了 7 / 失敗 4)。残り 4 件のエラー文は未入手
 - 指摘: (1) 保存中に Slides タブが前面に出てくる、(2) 速度が遅い
-- 原因の整理: `DOWNLOAD_PARALLEL_LIMIT=2` で Slides タブが 2 枚同時前面化されフォーカスを奪い合う + 描画待機が不安定化 (失敗の一因の可能性)。画像 fetch は `credentials:include` 固定で CDN (ACAO:*) に必ず失敗→background 経由の二重取得になっていた
+- 原因の整理: `DOWNLOAD_PARALLEL_LIMIT=2` で Slides タブが 2 枚同時前面化されフォーカスを奪い合う + 描画待機が不安定化 (失敗の一因の可能性)。画像 fetch は `credentials:include` 固定で CDN (ACAO:\*) に必ず失敗→background 経由の二重取得になっていた
 - 対応:
   - `public/background.js`: `google_slides` は `runSlidesExclusively` で直列化 (direct_file の並列 2 は維持)。`processSlidesDownload` で開始前のアクティブタブを記録し、終了時にユーザーが移動していなければ復元 (best-effort)
   - `public/slides-export/svg-export.js`: `fetchImageDirect` を `credentials:same-origin` に変更 (同一 origin は Cookie 送信、CDN は CORS 成功。認証要画像は background fetch が拾う)
 - 次の実機確認: 11 件全完走するか + タブのちらつきが収まったか。失敗が残る場合は最新エラー全文をもらう
+
+## viewer の別ウィンドウ化 (2026-10-05)
+
+- 要望: 保存ボタンを押すと Slides 画面に切り替わるのをやめ、後ろで動かしてほしい
+- 同一ウィンドウの非アクティブタブはタイマー抑制で遅くなるため、Chromium 系は非フォーカスの専用ウィンドウ (`focused:false`) に viewer を開く。別ウィンドウの前面タブは可視扱いで抑制されず、フォーカスも奪わない。Firefox は従来通りバックグラウンドタブ
+- 対応 (`public/background.js`):
+  - `openSlidesViewerWindow` / `windowsRemove` / `closeWindowQuietly` / `activeSlidesWindowIds` を追加。Chromium 経路はウィンドウ単位で開閉・リトライ・後始末 (reset/queue finally も対応)
+  - capture 経路の前面化は不要になった (タブは自ウィンドウで前面のため `ensureCaptureTabActive` は即通過)
 
 ---
 
