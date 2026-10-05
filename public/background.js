@@ -940,6 +940,13 @@
   }
 
   function isFirefoxLike() {
+    // Chromium 系 (Chrome / Dia / Edge / Brave) では userAgentData.brands が
+    // 存在する (Service Worker 含む)。`browser` 名前空間だけでの判定は
+    // Chromium 派生での誤検出があり得るため、Chromium の証拠を優先する。
+    const brands = globalThis.navigator?.userAgentData?.brands;
+    if (Array.isArray(brands) && brands.length > 0) {
+      return false;
+    }
     // browser 名前空間があるのは Firefox 系。UA は削減/偽装されうるので
     // フォールバックとしてのみ使う。
     if (typeof globalThis.browser?.runtime?.getURL === 'function') {
