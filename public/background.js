@@ -2727,18 +2727,30 @@
               },
               AGENT_LOG_HYPOTHESES.capture,
             );
-            const result = await processSlidesDownloadByCapture(
-              courseName,
-              entry,
-              {
-                ...state,
-                viewerUrl,
-              },
-              tabId,
-              windowId,
-              cancelToken,
-            );
-            return result;
+            try {
+              const result = await processSlidesDownloadByCapture(
+                courseName,
+                entry,
+                {
+                  ...state,
+                  viewerUrl,
+                },
+                tabId,
+                windowId,
+                cancelToken,
+              );
+              return result;
+            } catch (captureError) {
+              // 真因 (svgError) を捨てると権限メッセージだけが残り切り分け
+              // 不能になるため、code を保ったまま両方を載せて投げ直す。
+              // code が capturePermissionRequired のままなので
+              // needsCapturePermission の権限導線は維持される。
+              const chained = new Error(
+                `${normalizeText(captureError?.message, 'capture failed')}（直前の高速エクスポート失敗: ${normalizeText(svgError?.message, 'svg export failed')}）`,
+              );
+              chained.code = normalizeText(captureError?.code);
+              throw chained;
+            }
           }
         }
       }
