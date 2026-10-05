@@ -256,6 +256,11 @@ glassmoocs-flow-1777522397563-mk3mkd
   - capture fallback での意図的な前面化を中断検知が自殺と誤認しないよう `captureForegroundTabIds` を導入 (対象外 + 破棄時解除)。ユーザーによる他タブの前面化は従来通り中断
   - capture 時のみ前面化するため、終了時フォーカス復元は維持
 - 注意: 保存中に Slides タブを触ると中断扱いになる (Firefox と同じ仕様)
+
+## 軽量リファクタ (2026-10-05)
+
+- `shouldActivateSlidesExportTab()` (常時 false 化)・`slidesTabSession` 受け渡し・window 残骸を除去。`openOrReuseSlidesTab` は `active:false` 固定
+- `MOOcs_ORIGIN_PREFIX` の typo を修正
 - 次の実機確認: 保存開始時の一瞬のちらつき以外は MOOCs ページに留まること
 
 ---
