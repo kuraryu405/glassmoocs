@@ -6,9 +6,9 @@
 
 ## 処理フロー（読む順）
 
-1. **`permissions.contains({ origins: ['<all_urls>'] })`** — 未付与ならページ内 UI・popup・専用許可ウィンドウのいずれかから付与してもらう。
+1. **capture 権限ゲート** — background の `hasCapturePermission()` が見る。`<all_urls>` 付与済み、または (Chromium 等では) required host 権限の `https://docs.google.com/*` があれば capture 可。Firefox では `<all_urls>` が無いと権限不足になり得る。そのときだけページ内 UI・popup・専用許可ウィンドウの導線を使う。
 2. **`buildSlidesViewerUrl(entry)`**。`/embed`・`/pubembed` は **`/pub`**、private `/presentation/d/{id}/embed` は **`/present`** に寄せる（`waitForTabLoad` が `complete` になりにくい問題の対策）。
-3. **`tabs.create({ url: viewerUrl })`** — `about:blank` のまま固まる場合は最大 5 回リトライ（2 秒間隔）。
+3. **viewer の展開** — 両ブラウザともバックグラウンドタブ (`openOrReuseSlidesTab`, `active:false`) に開く。前面・別ウィンドウ化は macOS が `focused:false` を無視してフォーカスを奪うため廃止した。`about:blank` のまま固まる場合は最大 5 回リトライ（2 秒間隔）。終了時はタブを閉じ、capture fallback で前面化していた場合のみフォーカス復元する。
 4. まず Slides タブ上の SVG を順に直列化し、画像を data URL にインライン化して background へ返す。
 5. background 側で SVG を JPEG 化して PDF を組み立てる。失敗時のみ `captureVisibleTab` フォールバックへ落とす。
 6. **`finally` でタブを閉じる**。
@@ -36,7 +36,7 @@
 - `slides-export.js` / `svg-export.js` が画像を data URL にインライン化する。
 - background 側で SVG を JPEG 化し、PDF を組み立てる。
 - SVG export や画像取得に失敗した場合のみ、表示タブの `captureVisibleTab` フォールバックへ落とす。
-- capture fallback は `<all_urls>` の optional permission が必要になる場合がある。権限不足で止まったときは `needsCapturePermission` を `true` にし、popup / ページ内 UI の導線表示に使う。
+- capture fallback は Slides viewer (`docs.google.com`) の host 権限で動くため、通常は追加許可なしで使える。`needsCapturePermission` が `true` になるのはゲート不通過時 (主に Firefox で `<all_urls>` 未付与) のみで、そのときだけ popup / ページ内 UI の導線表示に使う。
 - 大きな PDF は **background 側で逐次組み立てて Blob download** する。全ページ JPEG を配列に貯めてから別形式へ二重保持しない。
 
 ---

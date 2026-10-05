@@ -40,8 +40,8 @@ flowchart LR
 ### [`public/manifest.json`](../../public/manifest.json)
 
 - `permissions`: `storage`, `downloads`, `tabs`, `scripting`
-- `host_permissions`: `https://moocs.iniad.org/*`
-- `optional_host_permissions`: `<all_urls>`（Slides キャプチャ利用時に popup / 専用許可ウィンドウから付与）
+- `host_permissions`: `https://moocs.iniad.org/*` + Slides 系（`https://docs.google.com/*`, `https://*.googleusercontent.com/*`, `https://*.gstatic.com/*` — background の画像 fetch / capture が `<all_urls>` 任意権限なしで動くための最小範囲。`isAllowedSlideImageUrl` の allowlist と一致させる）
+- `optional_host_permissions`: `<all_urls>`（Firefox の capture fallback 等、想定外ホスト用の予備。Chromium の通常フローでは不要）
 - `content_scripts`: MOOCs + `https://docs.google.com/presentation/*`（後者のみ `slides-export.js`）
 
 ### [`public/content.js`](../../public/content.js)

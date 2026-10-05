@@ -42,8 +42,12 @@
     }
 
     async function fetchImageDirect(url) {
+      // same-origin では Cookie を送り、cross-origin では送らない。
+      // CDN (googleusercontent 等) は ACAO:* のため credentials:include だと
+      // 必ず失敗して background 経由の二重取得になり遅い。認証が必要な画像は
+      // background fetch (host 権限あり・Cookie 付き) が拾う。
       const response = await fetch(url.toString(), {
-        credentials: 'include',
+        credentials: 'same-origin',
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -302,6 +306,24 @@
       await inlineSlideImages(cloned, page);
       const dimensions = getSvgDimensions(svg);
       const rect = svg.getBoundingClientRect();
+
+      // createImageBitmap は内在寸法 (width/height 属性) のない SVG Blob を
+      // "The source image could not be decoded." で拒否する仕様のため、
+      // 計測寸法を属性として刻む。Image 経由のラスタライズにも同じ寸法が使われる。
+      const intrinsicWidth = Math.max(
+        1,
+        Math.round(rect.width || dimensions.viewBoxWidth || 0),
+      );
+      const intrinsicHeight = Math.max(
+        1,
+        Math.round(rect.height || dimensions.viewBoxHeight || 0),
+      );
+      if (Number.isFinite(intrinsicWidth) && intrinsicWidth > 0) {
+        cloned.setAttribute('width', String(intrinsicWidth));
+      }
+      if (Number.isFinite(intrinsicHeight) && intrinsicHeight > 0) {
+        cloned.setAttribute('height', String(intrinsicHeight));
+      }
 
       const result = {
         svgText: new XMLSerializer().serializeToString(cloned),

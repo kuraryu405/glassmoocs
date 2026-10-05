@@ -490,6 +490,17 @@
         .forEach((button) => (button.disabled = busy));
     }
 
+    function toPanelActionErrorMessage(error) {
+      const message = normalizeText(error?.message);
+      // 拡張機能の再読み込み/更新後にページを再読み込みしていないと
+      // content script が孤児化し、DOM 抽出は動くが background 通信だけが
+      // 死ぬ (候補数は出るのにボタンが効かない、の正体)。
+      if (/context invalidated/i.test(message)) {
+        return '拡張機能の更新後はページの再読み込みが必要です。このページを再読み込みしてからもう一度押してください。';
+      }
+      return message || '資料処理に失敗しました。';
+    }
+
     async function runPanelAction(panel, action) {
       const statusNode = panel.querySelector('.glassmoocs-download-status');
       debugPanelLog('panel action run requested', {
@@ -505,6 +516,10 @@
         debugPanelLog('panel action completed', {
           snapshot: getPanelDebugSnapshot(panel),
         });
+        // 成功時は background が state を書くので即時 refresh する。
+        // 失敗時はここで refresh するとエラーメッセージが idle 表示で
+        // 上書きされて「無反応」に見えるため、あえて refresh しない。
+        scheduleDownloadPanelRefresh();
       } catch (error) {
         debugPanelLog('panel action failed', {
           error: {
@@ -519,14 +534,10 @@
           snapshot: getPanelDebugSnapshot(panel),
         });
         if (statusNode) {
-          statusNode.textContent = normalizeText(
-            error?.message,
-            '資料処理に失敗しました。',
-          );
+          statusNode.textContent = toPanelActionErrorMessage(error);
         }
       } finally {
         setPanelBusy(panel, false);
-        scheduleDownloadPanelRefresh();
       }
     }
 

@@ -58,8 +58,11 @@
   const debugLogSummaryNode = document.getElementById('debug-log-summary');
   const debugLogTextNode = document.getElementById('debug-log-text');
 
+  // 不足し得るのは optional の `<all_urls>` のみ (docs 系は required のため付与済み)。
+  // カードの表示判定・要求対象は `<all_urls>` にしておく。docs origin にすると
+  // Firefox で常時 granted 扱いになり、許可導線が消えてしまう。
   const CAPTURE_ORIGIN = '<all_urls>';
-  const MOOcs_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
+  const MOOCS_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
   let currentPageContext = null;
@@ -233,7 +236,7 @@
   }
 
   function isMoocsUrl(rawUrl) {
-    return typeof rawUrl === 'string' && rawUrl.startsWith(MOOcs_ORIGIN_PREFIX);
+    return typeof rawUrl === 'string' && rawUrl.startsWith(MOOCS_ORIGIN_PREFIX);
   }
 
   async function ensureMoocsContentReady(activeTab) {

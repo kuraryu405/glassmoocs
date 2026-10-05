@@ -56,7 +56,8 @@
     partialFailed: 'partial_failed',
     failed: 'failed',
   };
-  const CAPTURE_PERMISSION_ORIGIN = '<all_urls>';
+  const CAPTURE_PERMISSION_ORIGIN = 'https://docs.google.com/*';
+  const CAPTURE_PERMISSION_FALLBACK_ORIGIN = '<all_urls>';
   const CAPTURE_QUALITY = 88;
   const CAPTURE_INTERVAL_MS = 250;
   const CAPTURE_REACTIVATE_DELAY_MS = 500;
@@ -126,6 +127,8 @@
 
   let queueNonce = 0;
   const activeSlidesTabIds = new Set();
+  // capture fallback が意図的に前面化したタブ。中断検知の対象外にする。
+  const captureForegroundTabIds = new Set();
   let settingsDebugLoggingEnabled = false;
   let activeDebugLogContext = null;
   let debugLogBufferWrite = Promise.resolve();
@@ -939,6 +942,13 @@
   }
 
   function isFirefoxLike() {
+    // Chromium 系 (Chrome / Dia / Edge / Brave) では userAgentData.brands が
+    // 存在する (Service Worker 含む)。`browser` 名前空間だけでの判定は
+    // Chromium 派生での誤検出があり得るため、Chromium の証拠を優先する。
+    const brands = globalThis.navigator?.userAgentData?.brands;
+    if (Array.isArray(brands) && brands.length > 0) {
+      return false;
+    }
     // browser 名前空間があるのは Firefox 系。UA は削減/偽装されうるので
     // フォールバックとしてのみ使う。
     if (typeof globalThis.browser?.runtime?.getURL === 'function') {
@@ -951,10 +961,6 @@
 
   function shouldRasterizeSlidesInTab() {
     return !isFirefoxLike();
-  }
-
-  function shouldActivateSlidesExportTab() {
-    return shouldRasterizeSlidesInTab();
   }
 
   function sanitizePathSegment(value, fallback) {
@@ -1132,11 +1138,8 @@
 
   async function interruptSlidesQueueIfForegrounded(state) {
     const normalized = normalizeState(state);
-    // Chromium では Slides タブの前面化が rasterize の前提のため、
-    // 前面化をもって中断とみなさない(assertSlidesTabStillInBackground と対称)。
-    if (shouldActivateSlidesExportTab()) {
-      return normalized;
-    }
+    // viewer は両ブラウザともバックグラウンドタブで動かす。保存中にそのタブを
+    // 前面に出したら、ユーザー操作とみなして中断する。
     if (
       !isTransientStatus(normalized.status) ||
       normalizeText(normalized.activeJobType) !== 'google_slides' ||
@@ -1147,6 +1150,9 @@
 
     const trackedTabIds = [...activeSlidesTabIds];
     for (const tabId of trackedTabIds) {
+      if (captureForegroundTabIds.has(tabId)) {
+        continue;
+      }
       try {
         const tab = await tabsGet(tabId);
         if (!tab?.active) {
@@ -1351,6 +1357,7 @@
       return;
     } finally {
       activeSlidesTabIds.delete(tabId);
+      captureForegroundTabIds.delete(tabId);
     }
   }
 
@@ -1367,7 +1374,7 @@
       try {
         const reusedTab = await tabsUpdate(existingTabId, {
           url: viewerUrl,
-          active: shouldActivateSlidesExportTab(),
+          active: false,
         });
         rememberActiveSlidesTab(reusedTab?.id);
         return await waitForTabLoad(reusedTab.id, viewerUrl, cancelToken);
@@ -1378,7 +1385,7 @@
 
     const slidesTab = await tabsCreate({
       url: viewerUrl,
-      active: shouldActivateSlidesExportTab(),
+      active: false,
     });
     rememberActiveSlidesTab(slidesTab?.id);
     // waitForTabLoad の失敗で throw すると作成タブが orphan 化するため、
@@ -1716,10 +1723,6 @@
   }
 
   async function assertSlidesTabStillInBackground(tabId) {
-    if (shouldActivateSlidesExportTab()) {
-      return;
-    }
-
     let tab = null;
     try {
       tab = await tabsGet(tabId);
@@ -2217,7 +2220,11 @@
         },
         AGENT_LOG_HYPOTHESES.pdf,
       );
-      throw error;
+      // release build ではログ基盤がないため、次回切り分け用に寸法を載せて投げ直す。
+      // (code 付きエラーではないため queueDownloads の権限導線には影響しない)
+      throw new Error(
+        `${normalizeText(error?.message, 'slide rasterization failed')} (svg ${svgText.length} chars, request ${requestedWidth}x${requestedHeight}, target ${targetWidth}x${targetHeight}, firefoxLike:${isFirefoxLike()})`,
+      );
     } finally {
       postAgentLog(
         'background.js:renderSerializedSlidePage',
@@ -2450,6 +2457,36 @@
     return await downloadPdfBlob(pdfBlob, filename, cancelToken);
   }
 
+  // Slides viewer タブは常に docs.google.com で、required host_permissions に
+  // 含まれる。Chromium の captureVisibleTab は対象 origin の host 権限で動くため
+  // 追加許可なしで capture 可能。Firefox の capture は `<all_urls>` を要する
+  // 場合があるため、そちらは従来通り要求する。
+  async function hasCapturePermission() {
+    const fallbackGranted = await permissionsContains({
+      origins: [CAPTURE_PERMISSION_FALLBACK_ORIGIN],
+    });
+    const firefoxLike = isFirefoxLike();
+    // Firefox では docs origin の判定を省く (capture に `<all_urls>` を要するため)。
+    const originGranted = firefoxLike
+      ? false
+      : await permissionsContains({
+          origins: [CAPTURE_PERMISSION_ORIGIN],
+        });
+    const granted = fallbackGranted || originGranted;
+    postAgentLog(
+      'background.js:hasCapturePermission',
+      'capture permission gate evaluated',
+      {
+        fallbackGranted,
+        firefoxLike,
+        originGranted,
+        granted,
+      },
+      AGENT_LOG_HYPOTHESES.capture,
+    );
+    return granted;
+  }
+
   async function processSlidesDownloadByCapture(
     courseName,
     entry,
@@ -2471,9 +2508,7 @@
       AGENT_LOG_HYPOTHESES.capture,
     );
     assertNotCanceled(cancelToken);
-    const hasPermission = await permissionsContains({
-      origins: [CAPTURE_PERMISSION_ORIGIN],
-    });
+    const hasPermission = await hasCapturePermission();
     if (!hasPermission) {
       postAgentLog(
         'background.js:processSlidesDownloadByCapture',
@@ -2493,13 +2528,14 @@
       stage: 'prepare-slide-capture',
     });
 
-    // capture には前面タブが必要。Firefox では export タブをわざと後ろに
-    // 置くため、ここで前面化しないと ensureCaptureTabActive が必ず throw する。
+    // capture には前面タブが必要なため、ここでの前面化は意図的なものとして
+    // 中断検知の対象外にする (entry 終了時・タブ破棄時に解除)。
     try {
       const activeTabs = await tabsQuery({ active: true, windowId });
       if (activeTabs[0]?.id !== tabId) {
         await tabsUpdate(tabId, { active: true });
       }
+      captureForegroundTabIds.add(tabId);
     } catch (error) {
       postAgentLog(
         'background.js:processSlidesDownloadByCapture',
@@ -2596,13 +2632,7 @@
     return await downloadPdfBlob(pdfBlob, filename, cancelToken);
   }
 
-  async function processSlidesDownload(
-    courseName,
-    entry,
-    state,
-    cancelToken,
-    slidesTabSession = null,
-  ) {
+  async function processSlidesDownload(courseName, entry, state, cancelToken) {
     const viewerUrl = buildSlidesViewerUrl(entry);
     postAgentLog(
       'background.js:processSlidesDownload',
@@ -2626,8 +2656,20 @@
       stage: 'open-slides-viewer',
     });
 
-    let tabId =
-      typeof slidesTabSession?.tabId === 'number' ? slidesTabSession.tabId : -1;
+    let tabId = -1;
+    // capture fallback での前面化に備え、開始前のアクティブタブを覚えておき、
+    // 終了時にユーザーが別タブへ移動していなければ復元する (best-effort)。
+    let previousActiveTabId = null;
+    try {
+      const currentActive = await tabsQuery({
+        active: true,
+        currentWindow: true,
+      });
+      previousActiveTabId =
+        typeof currentActive[0]?.id === 'number' ? currentActive[0].id : null;
+    } catch {
+      previousActiveTabId = null;
+    }
     try {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         assertNotCanceled(cancelToken);
@@ -2648,16 +2690,10 @@
             await closeTabQuietly(tabId);
             tabId = -1;
           }
-          if (slidesTabSession) {
-            slidesTabSession.tabId = null;
-          }
           continue;
         }
 
         tabId = loadedTab.id;
-        if (slidesTabSession) {
-          slidesTabSession.tabId = tabId;
-        }
         postAgentLog(
           'background.js:processSlidesDownload',
           'slides tab created',
@@ -2708,18 +2744,30 @@
               },
               AGENT_LOG_HYPOTHESES.capture,
             );
-            const result = await processSlidesDownloadByCapture(
-              courseName,
-              entry,
-              {
-                ...state,
-                viewerUrl,
-              },
-              tabId,
-              windowId,
-              cancelToken,
-            );
-            return result;
+            try {
+              const result = await processSlidesDownloadByCapture(
+                courseName,
+                entry,
+                {
+                  ...state,
+                  viewerUrl,
+                },
+                tabId,
+                windowId,
+                cancelToken,
+              );
+              return result;
+            } catch (captureError) {
+              // 真因 (svgError) を捨てると権限メッセージだけが残り切り分け
+              // 不能になるため、code を保ったまま両方を載せて投げ直す。
+              // code が capturePermissionRequired のままなので
+              // needsCapturePermission の権限導線は維持される。
+              const chained = new Error(
+                `${normalizeText(captureError?.message, 'capture failed')}（直前の高速エクスポート失敗: ${normalizeText(svgError?.message, 'svg export failed')}）`,
+              );
+              chained.code = normalizeText(captureError?.code);
+              throw chained;
+            }
           }
         }
       }
@@ -2728,6 +2776,24 @@
         'Google スライドのタブを開けませんでした。しばらく待ってから再試行してください。',
       );
     } finally {
+      // capture fallback での前面化など、ユーザーが保存中に別所へ
+      // 移動していたら復元しない。
+      let shouldRestoreFocus = false;
+      if (
+        tabId !== -1 &&
+        typeof previousActiveTabId === 'number' &&
+        previousActiveTabId !== tabId
+      ) {
+        try {
+          const focusedTabs = await tabsQuery({
+            active: true,
+            lastFocusedWindow: true,
+          });
+          shouldRestoreFocus = focusedTabs[0]?.id === tabId;
+        } catch {
+          shouldRestoreFocus = false;
+        }
+      }
       if (tabId !== -1) {
         postAgentLog(
           'background.js:processSlidesDownload',
@@ -2737,8 +2803,12 @@
         );
         await closeTabQuietly(tabId);
       }
-      if (slidesTabSession) {
-        slidesTabSession.tabId = null;
+      if (shouldRestoreFocus) {
+        try {
+          await tabsUpdate(previousActiveTabId, { active: true });
+        } catch {
+          // 元タブが閉じられていた場合などは無視する。
+        }
       }
     }
   }
@@ -3199,9 +3269,7 @@
     }
 
     if (type === MESSAGE_TYPES.getSlidesCapturePermission) {
-      permissionsContains({
-        origins: [CAPTURE_PERMISSION_ORIGIN],
-      })
+      hasCapturePermission()
         .then((granted) => sendResponse({ ok: true, granted: !!granted }))
         .catch((error) =>
           sendResponse({
