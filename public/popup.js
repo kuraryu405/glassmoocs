@@ -58,9 +58,10 @@
   const debugLogSummaryNode = document.getElementById('debug-log-summary');
   const debugLogTextNode = document.getElementById('debug-log-text');
 
-  // Slides viewer は docs.google.com のみ。required host 権限に含まれるため
-  // 通常は追加許可なしで capture できる (background の hasCapturePermission と一致)。
-  const CAPTURE_ORIGIN = 'https://docs.google.com/*';
+  // 不足し得るのは optional の `<all_urls>` のみ (docs 系は required のため付与済み)。
+  // カードの表示判定・要求対象は `<all_urls>` にしておく。docs origin にすると
+  // Firefox で常時 granted 扱いになり、許可導線が消えてしまう。
+  const CAPTURE_ORIGIN = '<all_urls>';
   const MOOCS_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
