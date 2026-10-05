@@ -212,6 +212,16 @@ glassmoocs-flow-1777522397563-mk3mkd
   - `public/background.js`: capture fallback 失敗時に `code` を保ったまま高速エクスポート失敗の要約を chained message として投げ直す (`needsCapturePermission` 導線は維持)。これで次回失敗時は真因がパネルに残る
 - 次の実機確認: 新ビルドで再試行し、(1) 権限カードが出るか、(2) 出る場合・失敗する場合のエラーメッセージ全文をもらう
 
+## 真因は SVG の内在寸法不足 (2026-10-05)
+
+- 新エラーメッセージで真因が判明: `The source image could not be decoded.` (Chromium の `createImageBitmap` が SVG Blob を拒否する文言)
+- 仕様上 `createImageBitmap` は内在寸法 (width/height 属性) のない SVG をデコードできない。`serializeCurrentSlideSvg` は xmlns のみ付与し width/height を付けていなかった
+- なお権限エラーが併発した = その環境で `hasCapturePermission()` が false を返した。Chromium 新ビルドなら docs origin で true になるはずのため、次回切り分け用にゲート判定のログを追加した
+- 対応:
+  - `public/slides-export/svg-export.js`: 直列化 SVG に計測寸法 (rect → viewBox の順) を width/height 属性として刻む。Image 経由・bitmap 経由の双方に効く
+  - `public/background.js`: ゲート判定の内訳 (fallback 付与 / firefoxLike / origin 付与) を agent log に記録。ラスタ失敗時は寸法付きメッセージで投げ直す (code なしのため権限導線に影響なし)
+- 次の実機確認: 新ビルド (`dist/chromium` 再生成済み) + 拡張機能の再読み込み + MOOCs ページ再読み込みで 11 件が完走するか。失敗時はエラーメッセージ全文をもらう
+
 ---
 
 ## まず見るべきファイル
