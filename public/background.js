@@ -1457,7 +1457,39 @@
   // focused:false を無視して新規ウィンドウを必ず前面化するため、作成回数を
   // 1 回に抑えることがフォーカス奪取の最小化になる。タブの使い回しは
   // tabsUpdate の URL 遷移 + waitForTabLoad で行う。
-  async function openOrReuseSlidesWindow(session, viewerUrl, cancelToken) {
+  async function refocusAwayFromTab(tabId, refocusTabId) {
+    // 作成直後のウィンドウが前面化されていたら元のウィンドウへ戻す。
+    // ユーザーが既に別所へ移動済みの場合は何もしない (best-effort)。
+    if (
+      typeof tabId !== 'number' ||
+      typeof refocusTabId !== 'number' ||
+      tabId === refocusTabId
+    ) {
+      return;
+    }
+    try {
+      const focusedTabs = await tabsQuery({
+        active: true,
+        lastFocusedWindow: true,
+      });
+      if (focusedTabs[0]?.id !== tabId) {
+        return;
+      }
+      const refocusTab = await tabsGet(refocusTabId);
+      if (typeof refocusTab?.windowId === 'number') {
+        await windowsUpdate(refocusTab.windowId, { focused: true });
+      }
+    } catch {
+      // best-effort のため無視する。
+    }
+  }
+
+  async function openOrReuseSlidesWindow(
+    session,
+    viewerUrl,
+    cancelToken,
+    refocusTabId = null,
+  ) {
     assertNotCanceled(cancelToken);
     if (
       session &&
@@ -1496,6 +1528,9 @@
       session.windowId = windowId;
       session.tabId = typeof slidesTab?.id === 'number' ? slidesTab.id : null;
     }
+    // 読み込み完了を待つ前にフォーカスを戻す。完了後では遅く、
+    // 読み込み中の数秒間 Slides 画面を見せられることになる。
+    await refocusAwayFromTab(slidesTab?.id, refocusTabId);
     // waitForTabLoad の失敗で throw すると作成ウィンドウが orphan 化するため、
     // ここで閉じてから再 throw する。
     try {
@@ -2376,7 +2411,7 @@
       // release build ではログ基盤がないため、次回切り分け用に寸法を載せて投げ直す。
       // (code 付きエラーではないため queueDownloads の権限導線には影響しない)
       throw new Error(
-        `${normalizeText(error?.message, 'slide rasterization failed')} (svg ${svgText.length} chars, request ${requestedWidth}x${requestedHeight}, target ${targetWidth}x${targetHeight})`,
+        `${normalizeText(error?.message, 'slide rasterization failed')} (svg ${svgText.length} chars, request ${requestedWidth}x${requestedHeight}, target ${targetWidth}x${targetHeight}, firefoxLike:${isFirefoxLike()})`,
       );
     } finally {
       postAgentLog(
@@ -2819,7 +2854,6 @@
     // Chromium 経路で使っている共有 viewer ウィンドウ。エントリ単位では閉じず、
     // queue 終了時に activeSlidesWindowIds 経由でまとめて閉じる。
     let ownedWindowId = null;
-    let slidesWindowId = null;
     // Slides タブを前面化する前のアクティブタブを覚えておき、終了時に
     // ユーザーが別タブへ移動していなければ復元する (best-effort)。
     let previousActiveTabId = null;
@@ -2832,33 +2866,6 @@
         typeof currentActive[0]?.id === 'number' ? currentActive[0].id : null;
     } catch {
       previousActiveTabId = null;
-    }
-
-    async function refocusPreviousWindow() {
-      // macOS は windows.create の focused:false を無視して新規ウィンドウを
-      // 前面化するため、ユーザーが既に別所へ移動済みでない場合のみ元の
-      // ウィンドウへフォーカスを戻す (best-effort)。
-      if (typeof previousActiveTabId !== 'number') {
-        return;
-      }
-      try {
-        const focusedTabs = await tabsQuery({
-          active: true,
-          lastFocusedWindow: true,
-        });
-        if (focusedTabs[0]?.id !== tabId) {
-          return;
-        }
-        const previousTab = await tabsGet(previousActiveTabId);
-        if (
-          typeof previousTab?.windowId === 'number' &&
-          previousTab.windowId !== slidesWindowId
-        ) {
-          await windowsUpdate(previousTab.windowId, { focused: true });
-        }
-      } catch {
-        // best-effort のため無視する。
-      }
     }
     try {
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -2874,12 +2881,10 @@
               slidesTabSession,
               viewerUrl,
               cancelToken,
+              previousActiveTabId,
             );
             ownedWindowId = opened.windowId;
             loadedTab = opened.tab;
-            if (opened.created) {
-              await refocusPreviousWindow();
-            }
           } else {
             loadedTab = await openOrReuseSlidesTab(
               tabId,
@@ -2909,7 +2914,6 @@
         }
 
         tabId = loadedTab.id;
-        slidesWindowId = loadedTab.windowId;
         if (slidesTabSession) {
           slidesTabSession.tabId = tabId;
         }
