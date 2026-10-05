@@ -250,12 +250,12 @@ glassmoocs-flow-1777522397563-mk3mkd
 ## macOS の focused:false 無視 + ウィンドウ使い回し (2026-10-05)
 
 - macOS では `windows.create({ focused:false })` が無視され新規ウィンドウが必ず前面化される (OS 仕様)。裏調査で確認
+- 方針転換: 別ウィンドウ方式を廃止し、両ブラウザともバックグラウンドタブ (`active:false`) に統一。Firefox で完走実績のある方式であり、フォーカス奪取があり得ない。后台タブはタイマー抑制で遅くなるが沈黙動作を優先
 - 対応 (`public/background.js`):
-  - `openSlidesViewerWindow` → `openOrReuseSlidesWindow`: viewer ウィンドウをキュー内で使い回し (タブの URL 遷移+再待機)。作成はバッチあたり 1 回に
-  - 作成直後、ユーザーが移動済みでない場合のみ `windowsUpdate(mainWindowId, { focused:true })` で即時復帰。終了時復元も `lastFocusedWindow` 基準に改善 (別所へ移動済みなら復元しない)
-  - `queueDownloads` で `slidesWindowSession` を共有 (Firefox は null のまま従来通り)。後始末は queue finally / reset の tracked set に一本化
-- **追記**: refocus が読み込み完了後だったため数秒間 Slides 画面を見せていた。`refocusAwayFromTab` を作成直後 (load 前) に移動 + ラスタ失敗メッセージに `firefoxLike:` フラグを追加 (Dia の判定状態を切り分け用)
-- **追記2**: macOS の遅延 steal に備え、新ウィンドウ自体の `windowsUpdate(focused:false)` + 元ウィンドウ復帰を作成直後と読み込み完了後の 2 回実施 (`pushSlidesWindowBehind`)。version を 1.0.7 に上げ、Dia 上で更新適用の確認ができるようにした
+  - window 機構 (`openOrReuseSlidesWindow`, `pushSlidesWindowBehind`, `windowsRemove/Update`, `closeWindowQuietly`, `activeSlidesWindowIds`, `slidesWindowSession`, 直列 mutex) を全撤去。`shouldActivateSlidesExportTab()` は常時 false
+  - capture fallback での意図的な前面化を中断検知が自殺と誤認しないよう `captureForegroundTabIds` を導入 (対象外 + 破棄時解除)。ユーザーによる他タブの前面化は従来通り中断
+  - capture 時のみ前面化するため、終了時フォーカス復元は維持
+- 注意: 保存中に Slides タブを触ると中断扱いになる (Firefox と同じ仕様)
 - 次の実機確認: 保存開始時の一瞬のちらつき以外は MOOCs ページに留まること
 
 ---
