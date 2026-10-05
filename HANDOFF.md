@@ -222,6 +222,13 @@ glassmoocs-flow-1777522397563-mk3mkd
   - `public/background.js`: ゲート判定の内訳 (fallback 付与 / firefoxLike / origin 付与) を agent log に記録。ラスタ失敗時は寸法付きメッセージで投げ直す (code なしのため権限導線に影響なし)
 - 次の実機確認: 新ビルド (`dist/chromium` 再生成済み) + 拡張機能の再読み込み + MOOCs ページ再読み込みで 11 件が完走するか。失敗時はエラーメッセージ全文をもらう
 
+## Dia 環境での Firefox 誤検出 (2026-10-05)
+
+- ユーザー環境は Dia (Chromium 系)。権限エラー + `createImageBitmap` デコード失敗 + Image フォールバック失敗の三重苦は、`isFirefoxLike()` が Dia で true を返していたことで全て説明がつく (Firefox 経路: タブ非活性・background ラスタ・ゲート不通過)
+- `browser` 名前空間の有無だけでは Chromium 派生での誤検出があり得るため、`navigator.userAgentData.brands` (Chromium 系のみ存在。SW 含む) があれば Chromium と判定する順に変更。素の Firefox (brands なし) の挙動は不変
+- これで Dia ではタブラスタライズ→background bitmap (内在寸法付きで可) →capture (無許可) の三段が全て Chromium 経路で動く
+- 新旧ビルドの見分け方: 失敗メッセージに `(svg N chars, request WxH, target WxH)` が付けば寸法対応版。それがなければ拡張機能の再読み込みが古い dist のまま
+
 ---
 
 ## まず見るべきファイル
