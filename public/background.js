@@ -963,15 +963,6 @@
     return !isFirefoxLike();
   }
 
-  function shouldActivateSlidesExportTab() {
-    // 両ブラウザとも viewer はバックグラウンドタブで処理する。Chromium 系で
-    // 別ウィンドウ化を試したが、macOS が focused:false を無視して前面化する
-    // ため後ろで動かせない。バックグラウンドタブはタイマー抑制で遅くなるが、
-    // Firefox で完走実績のある方式であり、フォーカスを奪わないことを優先する。
-    // capture fallback 時のみ前面化する (処理後に復元)。
-    return false;
-  }
-
   function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value, fallback);
     let replaced = normalized
@@ -1383,7 +1374,7 @@
       try {
         const reusedTab = await tabsUpdate(existingTabId, {
           url: viewerUrl,
-          active: shouldActivateSlidesExportTab(),
+          active: false,
         });
         rememberActiveSlidesTab(reusedTab?.id);
         return await waitForTabLoad(reusedTab.id, viewerUrl, cancelToken);
@@ -1394,7 +1385,7 @@
 
     const slidesTab = await tabsCreate({
       url: viewerUrl,
-      active: shouldActivateSlidesExportTab(),
+      active: false,
     });
     rememberActiveSlidesTab(slidesTab?.id);
     // waitForTabLoad の失敗で throw すると作成タブが orphan 化するため、
@@ -1732,10 +1723,6 @@
   }
 
   async function assertSlidesTabStillInBackground(tabId) {
-    if (shouldActivateSlidesExportTab()) {
-      return;
-    }
-
     let tab = null;
     try {
       tab = await tabsGet(tabId);
@@ -2645,13 +2632,7 @@
     return await downloadPdfBlob(pdfBlob, filename, cancelToken);
   }
 
-  async function processSlidesDownload(
-    courseName,
-    entry,
-    state,
-    cancelToken,
-    slidesTabSession = null,
-  ) {
+  async function processSlidesDownload(courseName, entry, state, cancelToken) {
     const viewerUrl = buildSlidesViewerUrl(entry);
     postAgentLog(
       'background.js:processSlidesDownload',
@@ -2675,8 +2656,7 @@
       stage: 'open-slides-viewer',
     });
 
-    let tabId =
-      typeof slidesTabSession?.tabId === 'number' ? slidesTabSession.tabId : -1;
+    let tabId = -1;
     // capture fallback での前面化に備え、開始前のアクティブタブを覚えておき、
     // 終了時にユーザーが別タブへ移動していなければ復元する (best-effort)。
     let previousActiveTabId = null;
@@ -2709,9 +2689,6 @@
           if (tabId !== -1) {
             await closeTabQuietly(tabId);
             tabId = -1;
-          }
-          if (slidesTabSession) {
-            slidesTabSession.tabId = null;
           }
           continue;
         }
@@ -2832,9 +2809,6 @@
         } catch {
           // 元タブが閉じられていた場合などは無視する。
         }
-      }
-      if (slidesTabSession) {
-        slidesTabSession.tabId = null;
       }
     }
   }

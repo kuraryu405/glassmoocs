@@ -61,7 +61,7 @@
   // Slides viewer は docs.google.com のみ。required host 権限に含まれるため
   // 通常は追加許可なしで capture できる (background の hasCapturePermission と一致)。
   const CAPTURE_ORIGIN = 'https://docs.google.com/*';
-  const MOOcs_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
+  const MOOCS_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
   let currentPageContext = null;
@@ -235,7 +235,7 @@
   }
 
   function isMoocsUrl(rawUrl) {
-    return typeof rawUrl === 'string' && rawUrl.startsWith(MOOcs_ORIGIN_PREFIX);
+    return typeof rawUrl === 'string' && rawUrl.startsWith(MOOCS_ORIGIN_PREFIX);
   }
 
   async function ensureMoocsContentReady(activeTab) {
