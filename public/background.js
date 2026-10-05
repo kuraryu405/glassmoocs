@@ -127,20 +127,11 @@
 
   let queueNonce = 0;
   const activeSlidesTabIds = new Set();
-  const activeSlidesWindowIds = new Set();
+  // capture fallback が意図的に前面化したタブ。中断検知の対象外にする。
+  const captureForegroundTabIds = new Set();
   let settingsDebugLoggingEnabled = false;
   let activeDebugLogContext = null;
   let debugLogBufferWrite = Promise.resolve();
-  // Slides viewer タブは前面化して処理するため、並列ワーカーが複数タブを
-  // 開くとフォーカスを奪い合って描画待機が不安定になる。google_slides は
-  // 直列化し、direct_file の並列性は維持する。
-  let slidesExclusiveTail = Promise.resolve();
-
-  function runSlidesExclusively(task) {
-    const result = slidesExclusiveTail.then(() => task());
-    slidesExclusiveTail = result.catch(() => {});
-    return result;
-  }
 
   if (!api?.runtime?.onMessage) {
     return;
@@ -763,60 +754,6 @@
     });
   }
 
-  function windowsRemove(windowId) {
-    try {
-      const result = api.windows.remove(windowId);
-      if (result && typeof result.then === 'function') {
-        return result.then(() => {});
-      }
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        api.windows.remove(windowId, () => {
-          const error = getRuntimeLastError();
-          if (error) {
-            reject(new Error(error.message));
-            return;
-          }
-
-          resolve();
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  function windowsUpdate(windowId, updateInfo) {
-    try {
-      const result = api.windows.update(windowId, updateInfo);
-      if (result && typeof result.then === 'function') {
-        return result;
-      }
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        api.windows.update(windowId, updateInfo, (windowInfo) => {
-          const error = getRuntimeLastError();
-          if (error) {
-            reject(new Error(error.message));
-            return;
-          }
-
-          resolve(windowInfo);
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
   function tabsRemove(tabIds) {
     try {
       const result = api.tabs.remove(tabIds);
@@ -1027,7 +964,12 @@
   }
 
   function shouldActivateSlidesExportTab() {
-    return shouldRasterizeSlidesInTab();
+    // 両ブラウザとも viewer はバックグラウンドタブで処理する。Chromium 系で
+    // 別ウィンドウ化を試したが、macOS が focused:false を無視して前面化する
+    // ため後ろで動かせない。バックグラウンドタブはタイマー抑制で遅くなるが、
+    // Firefox で完走実績のある方式であり、フォーカスを奪わないことを優先する。
+    // capture fallback 時のみ前面化する (処理後に復元)。
+    return false;
   }
 
   function sanitizePathSegment(value, fallback) {
@@ -1205,11 +1147,8 @@
 
   async function interruptSlidesQueueIfForegrounded(state) {
     const normalized = normalizeState(state);
-    // Chromium では Slides タブの前面化が rasterize の前提のため、
-    // 前面化をもって中断とみなさない(assertSlidesTabStillInBackground と対称)。
-    if (shouldActivateSlidesExportTab()) {
-      return normalized;
-    }
+    // viewer は両ブラウザともバックグラウンドタブで動かす。保存中にそのタブを
+    // 前面に出したら、ユーザー操作とみなして中断する。
     if (
       !isTransientStatus(normalized.status) ||
       normalizeText(normalized.activeJobType) !== 'google_slides' ||
@@ -1220,6 +1159,9 @@
 
     const trackedTabIds = [...activeSlidesTabIds];
     for (const tabId of trackedTabIds) {
+      if (captureForegroundTabIds.has(tabId)) {
+        continue;
+      }
       try {
         const tab = await tabsGet(tabId);
         if (!tab?.active) {
@@ -1424,136 +1366,13 @@
       return;
     } finally {
       activeSlidesTabIds.delete(tabId);
+      captureForegroundTabIds.delete(tabId);
     }
   }
 
   function rememberActiveSlidesTab(tabId) {
     if (typeof tabId === 'number') {
       activeSlidesTabIds.add(tabId);
-    }
-  }
-
-  function rememberActiveSlidesWindow(windowId) {
-    if (typeof windowId === 'number') {
-      activeSlidesWindowIds.add(windowId);
-    }
-  }
-
-  async function closeWindowQuietly(windowId) {
-    if (typeof windowId !== 'number') {
-      return;
-    }
-
-    try {
-      await windowsRemove(windowId);
-    } catch {
-      return;
-    } finally {
-      activeSlidesWindowIds.delete(windowId);
-    }
-  }
-
-  // Chromium 系では viewer ウィンドウをキュー内で使い回す。macOS は
-  // focused:false を無視して新規ウィンドウを必ず前面化するため、作成回数を
-  // 1 回に抑えることがフォーカス奪取の最小化になる。タブの使い回しは
-  // tabsUpdate の URL 遷移 + waitForTabLoad で行う。
-  async function pushSlidesWindowBehind(newTabId, newWindowId, refocusTabId) {
-    // macOS は windows.create の focused:false を無視して新規ウィンドウを
-    // 前面化するため、(1) 新ウィンドウ自体を非フォーカス化、(2) 元ウィンドウへ
-    // 戻す、の順で押し戻す。ユーザーが既に別所へ移動済みの場合は何もしない。
-    if (
-      typeof newTabId !== 'number' ||
-      typeof refocusTabId !== 'number' ||
-      newTabId === refocusTabId
-    ) {
-      return;
-    }
-    try {
-      if (typeof newWindowId === 'number') {
-        await windowsUpdate(newWindowId, { focused: false });
-      }
-      const focusedTabs = await tabsQuery({
-        active: true,
-        lastFocusedWindow: true,
-      });
-      if (focusedTabs[0]?.id !== newTabId) {
-        return;
-      }
-      const refocusTab = await tabsGet(refocusTabId);
-      if (typeof refocusTab?.windowId === 'number') {
-        await windowsUpdate(refocusTab.windowId, { focused: true });
-      }
-    } catch {
-      // best-effort のため無視する。
-    }
-  }
-
-  async function openOrReuseSlidesWindow(
-    session,
-    viewerUrl,
-    cancelToken,
-    refocusTabId = null,
-  ) {
-    assertNotCanceled(cancelToken);
-    if (
-      session &&
-      typeof session.windowId === 'number' &&
-      typeof session.tabId === 'number'
-    ) {
-      try {
-        const reusedTab = await tabsUpdate(session.tabId, {
-          url: viewerUrl,
-          active: true,
-        });
-        rememberActiveSlidesTab(reusedTab?.id);
-        const loadedTab = await waitForTabLoad(
-          reusedTab.id,
-          viewerUrl,
-          cancelToken,
-        );
-        return { tab: loadedTab, windowId: session.windowId, created: false };
-      } catch {
-        await closeWindowQuietly(session.windowId);
-        session.windowId = null;
-        session.tabId = null;
-      }
-    }
-
-    assertNotCanceled(cancelToken);
-    const slidesWindow = await windowsCreate({
-      url: viewerUrl,
-      focused: false,
-    });
-    const windowId = slidesWindow?.id;
-    const slidesTab = slidesWindow?.tabs?.[0];
-    rememberActiveSlidesWindow(windowId);
-    rememberActiveSlidesTab(slidesTab?.id);
-    if (session) {
-      session.windowId = windowId;
-      session.tabId = typeof slidesTab?.id === 'number' ? slidesTab.id : null;
-    }
-    // 読み込み完了を待つ前にフォーカスを戻す。完了後では遅く、
-    // 読み込み中の数秒間 Slides 画面を見せられることになる。
-    await pushSlidesWindowBehind(slidesTab?.id, windowId, refocusTabId);
-    // waitForTabLoad の失敗で throw すると作成ウィンドウが orphan 化するため、
-    // ここで閉じてから再 throw する。
-    try {
-      assertNotCanceled(cancelToken);
-      const loadedTab = await waitForTabLoad(
-        slidesTab.id,
-        viewerUrl,
-        cancelToken,
-      );
-      // 読み込み完了時点でも前面化されていたら再度押し戻す (macOS の遅延 steal 対策)。
-      await pushSlidesWindowBehind(loadedTab?.id, windowId, refocusTabId);
-      return { tab: loadedTab, windowId, created: true };
-    } catch (error) {
-      await closeWindowQuietly(windowId);
-      if (session) {
-        session.windowId = null;
-        session.tabId = null;
-      }
-      throw error;
     }
   }
 
@@ -2722,13 +2541,14 @@
       stage: 'prepare-slide-capture',
     });
 
-    // capture には前面タブが必要。Firefox では export タブをわざと後ろに
-    // 置くため、ここで前面化しないと ensureCaptureTabActive が必ず throw する。
+    // capture には前面タブが必要なため、ここでの前面化は意図的なものとして
+    // 中断検知の対象外にする (entry 終了時・タブ破棄時に解除)。
     try {
       const activeTabs = await tabsQuery({ active: true, windowId });
       if (activeTabs[0]?.id !== tabId) {
         await tabsUpdate(tabId, { active: true });
       }
+      captureForegroundTabIds.add(tabId);
     } catch (error) {
       postAgentLog(
         'background.js:processSlidesDownloadByCapture',
@@ -2857,11 +2677,8 @@
 
     let tabId =
       typeof slidesTabSession?.tabId === 'number' ? slidesTabSession.tabId : -1;
-    // Chromium 経路で使っている共有 viewer ウィンドウ。エントリ単位では閉じず、
-    // queue 終了時に activeSlidesWindowIds 経由でまとめて閉じる。
-    let ownedWindowId = null;
-    // Slides タブを前面化する前のアクティブタブを覚えておき、終了時に
-    // ユーザーが別タブへ移動していなければ復元する (best-effort)。
+    // capture fallback での前面化に備え、開始前のアクティブタブを覚えておき、
+    // 終了時にユーザーが別タブへ移動していなければ復元する (best-effort)。
     let previousActiveTabId = null;
     try {
       const currentActive = await tabsQuery({
@@ -2882,47 +2699,24 @@
 
         let loadedTab = null;
         try {
-          if (shouldActivateSlidesExportTab()) {
-            const opened = await openOrReuseSlidesWindow(
-              slidesTabSession,
-              viewerUrl,
-              cancelToken,
-              previousActiveTabId,
-            );
-            ownedWindowId = opened.windowId;
-            loadedTab = opened.tab;
-          } else {
-            loadedTab = await openOrReuseSlidesTab(
-              tabId,
-              viewerUrl,
-              cancelToken,
-            );
-          }
+          loadedTab = await openOrReuseSlidesTab(tabId, viewerUrl, cancelToken);
         } catch (error) {
           // キャンセルは即座に伝播させる。呑んで continue すると
           // sleep+タブ churn の後に abort する無駄が生じる。
           if (isCancellationError(error)) {
             throw error;
           }
-          if (shouldActivateSlidesExportTab()) {
-            // 共有ウィンドウの後始末は openOrReuseSlidesWindow 内で済み。
-            // 古い tabId を finally で閉じないよう捨てる。
-            tabId = -1;
-          } else if (tabId !== -1) {
+          if (tabId !== -1) {
             await closeTabQuietly(tabId);
             tabId = -1;
           }
           if (slidesTabSession) {
             slidesTabSession.tabId = null;
-            slidesTabSession.windowId = null;
           }
           continue;
         }
 
         tabId = loadedTab.id;
-        if (slidesTabSession) {
-          slidesTabSession.tabId = tabId;
-        }
         postAgentLog(
           'background.js:processSlidesDownload',
           'slides tab created',
@@ -3005,8 +2799,8 @@
         'Google スライドのタブを開けませんでした。しばらく待ってから再試行してください。',
       );
     } finally {
-      // ユーザーが保存中に別所へ移動していたら復元しない。共有ウィンドウが
-      // 背面にあるままなら lastFocusedWindow は別タブのため何もしない。
+      // capture fallback での前面化など、ユーザーが保存中に別所へ
+      // 移動していたら復元しない。
       let shouldRestoreFocus = false;
       if (
         tabId !== -1 &&
@@ -3023,9 +2817,7 @@
           shouldRestoreFocus = false;
         }
       }
-      if (ownedWindowId === null && tabId !== -1) {
-        // Firefox 経路のみ: エントリ毎のタブを閉じる。Chromium の共有
-        // viewer ウィンドウは queue 終了時にまとめて閉じる。
+      if (tabId !== -1) {
         postAgentLog(
           'background.js:processSlidesDownload',
           'closing slides tab',
@@ -3041,8 +2833,9 @@
           // 元タブが閉じられていた場合などは無視する。
         }
       }
-      // 共有 viewer セッションは次エントリで使い回すため、ここでは触らない。
-      // 後始末は openOrReuseSlidesWindow の失敗時と queue 終了時に行う。
+      if (slidesTabSession) {
+        slidesTabSession.tabId = null;
+      }
     }
   }
 
@@ -3143,9 +2936,6 @@
     }
 
     const cancelToken = createCancelToken(currentNonce);
-    // Chromium 経路の viewer ウィンドウを使い回すための共有セッション。
-    // Firefox は従来通りエントリ毎タブ (null を渡す)。
-    const slidesWindowSession = { windowId: null, tabId: null };
     let state = await loadState();
     let stateWrite = Promise.resolve();
 
@@ -3212,14 +3002,11 @@
       try {
         const result =
           entry.kind === 'google_slides'
-            ? await runSlidesExclusively(() =>
-                processSlidesDownload(
-                  courseName,
-                  entry,
-                  entryState,
-                  cancelToken,
-                  shouldActivateSlidesExportTab() ? slidesWindowSession : null,
-                ),
+            ? await processSlidesDownload(
+                courseName,
+                entry,
+                entryState,
+                cancelToken,
               )
             : await processDirectDownload(courseName, entry, cancelToken);
         postAgentLog(
@@ -3362,10 +3149,7 @@
         AGENT_LOG_HYPOTHESES.queue,
       );
     } finally {
-      await Promise.all([
-        ...[...activeSlidesTabIds].map(closeTabQuietly),
-        ...[...activeSlidesWindowIds].map(closeWindowQuietly),
-      ]);
+      await Promise.all([...activeSlidesTabIds].map(closeTabQuietly));
       activeDebugLogContext = null;
     }
   }
@@ -3424,11 +3208,6 @@
       activeSlidesTabIds.clear();
       closingTabIds.forEach((tabId) => {
         closeTabQuietly(tabId).catch(() => {});
-      });
-      const closingWindowIds = [...activeSlidesWindowIds];
-      activeSlidesWindowIds.clear();
-      closingWindowIds.forEach((windowId) => {
-        closeWindowQuietly(windowId).catch(() => {});
       });
       saveState(createIdleState())
         .then((state) => sendResponse({ ok: true, state }))
