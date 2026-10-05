@@ -119,8 +119,37 @@
       try {
         grantSlidesPermissionButton.disabled = true;
         setSlidesPermissionStatus('');
-        // popup が閉じると inline 要求は立ち消えるため、専用ウィンドウ経由を
-        // 優先する。開けなければ inline 要求にフォールバックする。
+        // Chromium の permissions.request はユーザージェスチャ必須のため、
+        // popup ボタンのクリックジェスチャが生きている inline 要求を優先する。
+        // popup が閉じて要求が立ち消えた場合のみ専用ウィンドウにフォールバックする。
+        try {
+          const granted = await permissionsRequest({
+            origins: [captureOrigin],
+          });
+          if (granted) {
+            slidesPermissionCard.style.display = 'none';
+            setDownloadStateMessage('Slides キャプチャを許可しました。');
+            const cleared = {
+              ...(getCurrentDownloadState() || {}),
+              lastError: '',
+              needsCapturePermission: false,
+            };
+            setCurrentDownloadState(cleared);
+            // メモリ更新だけだと次回 refreshState で storage の古い値に
+            // 上書きされるため永続化する。
+            if (typeof persistDownloadState === 'function') {
+              persistDownloadState(cleared).catch(() => {});
+            }
+            return;
+          }
+          // ダイアログは表示されたが許可されなかった場合はウィンドウを
+          // 開き直さず、その旨だけ伝える。
+          setSlidesPermissionStatus('権限が許可されませんでした。');
+          return;
+        } catch {
+          // popup が閉じる等で inline 要求が立ち消えた場合は
+          // 専用ウィンドウ経由にフォールバックする。
+        }
         if (typeof openSlidesCapturePermissionWindow === 'function') {
           try {
             await openSlidesCapturePermissionWindow();
@@ -132,26 +161,9 @@
             // フォールバックへ進む。
           }
         }
-        const granted = await permissionsRequest({
-          origins: [captureOrigin],
-        });
-        if (granted) {
-          slidesPermissionCard.style.display = 'none';
-          setDownloadStateMessage('Slides キャプチャを許可しました。');
-          const cleared = {
-            ...(getCurrentDownloadState() || {}),
-            lastError: '',
-            needsCapturePermission: false,
-          };
-          setCurrentDownloadState(cleared);
-          // メモリ更新だけだと次回 refreshState で storage の古い値に
-          // 上書きされるため永続化する。
-          if (typeof persistDownloadState === 'function') {
-            persistDownloadState(cleared).catch(() => {});
-          }
-          return;
-        }
-        setSlidesPermissionStatus('権限が許可されませんでした。');
+        setSlidesPermissionStatus(
+          '権限要求に失敗しました。拡張機能のポップアップを開き直して再試行してください。',
+        );
       } catch (error) {
         setSlidesPermissionStatus(
           normalizeText(

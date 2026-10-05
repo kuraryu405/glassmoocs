@@ -4,7 +4,12 @@
   "version": "1.0.6",
   "description": "MOOCSをグラスモーフィズム化してカッコよくする拡張機能",
   "permissions": ["storage", "downloads", "tabs", "scripting"],
-  "host_permissions": ["https://moocs.iniad.org/*"],
+  "host_permissions": [
+    "https://moocs.iniad.org/*",
+    "https://docs.google.com/*",
+    "https://*.googleusercontent.com/*",
+    "https://*.gstatic.com/*"
+  ],
   "optional_host_permissions": ["<all_urls>"],
   "browser_specific_settings": {
     "gecko": {

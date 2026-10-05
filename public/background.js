@@ -56,7 +56,8 @@
     partialFailed: 'partial_failed',
     failed: 'failed',
   };
-  const CAPTURE_PERMISSION_ORIGIN = '<all_urls>';
+  const CAPTURE_PERMISSION_ORIGIN = 'https://docs.google.com/*';
+  const CAPTURE_PERMISSION_FALLBACK_ORIGIN = '<all_urls>';
   const CAPTURE_QUALITY = 88;
   const CAPTURE_INTERVAL_MS = 250;
   const CAPTURE_REACTIVATE_DELAY_MS = 500;
@@ -2450,6 +2451,26 @@
     return await downloadPdfBlob(pdfBlob, filename, cancelToken);
   }
 
+  // Slides viewer タブは常に docs.google.com で、required host_permissions に
+  // 含まれる。Chromium の captureVisibleTab は対象 origin の host 権限で動くため
+  // 追加許可なしで capture 可能。Firefox の capture は `<all_urls>` を要する
+  // 場合があるため、そちらは従来通り要求する。
+  async function hasCapturePermission() {
+    if (
+      await permissionsContains({
+        origins: [CAPTURE_PERMISSION_FALLBACK_ORIGIN],
+      })
+    ) {
+      return true;
+    }
+    if (isFirefoxLike()) {
+      return false;
+    }
+    return await permissionsContains({
+      origins: [CAPTURE_PERMISSION_ORIGIN],
+    });
+  }
+
   async function processSlidesDownloadByCapture(
     courseName,
     entry,
@@ -2471,9 +2492,7 @@
       AGENT_LOG_HYPOTHESES.capture,
     );
     assertNotCanceled(cancelToken);
-    const hasPermission = await permissionsContains({
-      origins: [CAPTURE_PERMISSION_ORIGIN],
-    });
+    const hasPermission = await hasCapturePermission();
     if (!hasPermission) {
       postAgentLog(
         'background.js:processSlidesDownloadByCapture',
@@ -3199,9 +3218,7 @@
     }
 
     if (type === MESSAGE_TYPES.getSlidesCapturePermission) {
-      permissionsContains({
-        origins: [CAPTURE_PERMISSION_ORIGIN],
-      })
+      hasCapturePermission()
         .then((granted) => sendResponse({ ok: true, granted: !!granted }))
         .catch((error) =>
           sendResponse({

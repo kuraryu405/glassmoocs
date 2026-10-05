@@ -58,7 +58,9 @@
   const debugLogSummaryNode = document.getElementById('debug-log-summary');
   const debugLogTextNode = document.getElementById('debug-log-text');
 
-  const CAPTURE_ORIGIN = '<all_urls>';
+  // Slides viewer は docs.google.com のみ。required host 権限に含まれるため
+  // 通常は追加許可なしで capture できる (background の hasCapturePermission と一致)。
+  const CAPTURE_ORIGIN = 'https://docs.google.com/*';
   const MOOcs_ORIGIN_PREFIX = 'https://moocs.iniad.org/';
 
   let currentTabId = null;
