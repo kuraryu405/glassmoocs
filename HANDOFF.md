@@ -194,6 +194,15 @@ glassmoocs-flow-1777522397563-mk3mkd
 - 残存 `<all_urls>` 参照は manifest の optional + background の fallback OR + 専用許可ウィンドウ (最終手段) のみで整合
 - 拾い忘れ 1 件を修正: `public/popup-launcher.html` / `public/popup-launcher.js` はどこからも開かれないデッドファイル ("add settingpages" の残骸。popup は直接 `openOptionsPage()` 呼び)。削除 + `scripts/build-extension.mjs` の `SCRIPT_FILES` から除去。`pnpm run ci` 通過済み
 
+## ページ内パネルの「ボタン無反応」報告 (2026-10-05)
+
+- 症状: 「このページから N 件の候補資料を保存できます」と出るのに保存ボタンを押しても無反応
+- 見立て: `runPanelAction` の失敗時に `finally` で `scheduleDownloadPanelRefresh()` しており、エラーメッセージが約60ms後に idle 表示で上書きされていた (無反応に見える正体)。かつ `getDownloadState()` が全エラーを握り潰して idle を返すため、background 通信不能でもパネルは正常表示になる
+- 最有力の根本原因: 拡張機能の再読み込み/更新後に MOOCs ページを再読み込みしておらず、content script が孤児化 (`Extension context invalidated`)。DOM 抽出は動くが background 通信だけ死ぬ
+- 対応:
+  - `public/content/download-panel.js`: 失敗時は refresh せずエラーメッセージを残す。`context invalidated` 系エラーは「拡張機能の更新後はページの再読み込みが必要」旨の文言に変換
+- ユーザーへの案内: MOOCs ページを再読み込み (F5) して再試行。それでも失敗する場合はパネルに残るエラーメッセージを教えてもらう
+
 ---
 
 ## まず見るべきファイル
