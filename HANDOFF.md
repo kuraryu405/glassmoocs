@@ -10,7 +10,7 @@
 ## ブランチ
 
 ```text
-codecode/options-refresh
+fix/chromium-slides-capture-permission (PR #19, base: main)
 ```
 
 ---
