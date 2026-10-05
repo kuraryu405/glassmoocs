@@ -1457,22 +1457,26 @@
   // focused:false を無視して新規ウィンドウを必ず前面化するため、作成回数を
   // 1 回に抑えることがフォーカス奪取の最小化になる。タブの使い回しは
   // tabsUpdate の URL 遷移 + waitForTabLoad で行う。
-  async function refocusAwayFromTab(tabId, refocusTabId) {
-    // 作成直後のウィンドウが前面化されていたら元のウィンドウへ戻す。
-    // ユーザーが既に別所へ移動済みの場合は何もしない (best-effort)。
+  async function pushSlidesWindowBehind(newTabId, newWindowId, refocusTabId) {
+    // macOS は windows.create の focused:false を無視して新規ウィンドウを
+    // 前面化するため、(1) 新ウィンドウ自体を非フォーカス化、(2) 元ウィンドウへ
+    // 戻す、の順で押し戻す。ユーザーが既に別所へ移動済みの場合は何もしない。
     if (
-      typeof tabId !== 'number' ||
+      typeof newTabId !== 'number' ||
       typeof refocusTabId !== 'number' ||
-      tabId === refocusTabId
+      newTabId === refocusTabId
     ) {
       return;
     }
     try {
+      if (typeof newWindowId === 'number') {
+        await windowsUpdate(newWindowId, { focused: false });
+      }
       const focusedTabs = await tabsQuery({
         active: true,
         lastFocusedWindow: true,
       });
-      if (focusedTabs[0]?.id !== tabId) {
+      if (focusedTabs[0]?.id !== newTabId) {
         return;
       }
       const refocusTab = await tabsGet(refocusTabId);
@@ -1530,7 +1534,7 @@
     }
     // 読み込み完了を待つ前にフォーカスを戻す。完了後では遅く、
     // 読み込み中の数秒間 Slides 画面を見せられることになる。
-    await refocusAwayFromTab(slidesTab?.id, refocusTabId);
+    await pushSlidesWindowBehind(slidesTab?.id, windowId, refocusTabId);
     // waitForTabLoad の失敗で throw すると作成ウィンドウが orphan 化するため、
     // ここで閉じてから再 throw する。
     try {
@@ -1540,6 +1544,8 @@
         viewerUrl,
         cancelToken,
       );
+      // 読み込み完了時点でも前面化されていたら再度押し戻す (macOS の遅延 steal 対策)。
+      await pushSlidesWindowBehind(loadedTab?.id, windowId, refocusTabId);
       return { tab: loadedTab, windowId, created: true };
     } catch (error) {
       await closeWindowQuietly(windowId);
