@@ -251,9 +251,10 @@ glassmoocs-flow-1777522397563-mk3mkd
 
 - macOS では `windows.create({ focused:false })` が無視され新規ウィンドウが必ず前面化される (OS 仕様)。裏調査で確認
 - 対応 (`public/background.js`):
-  - `openOrReuseSlidesWindow`: viewer ウィンドウをキュー内で使い回し (タブの URL 遷移+再待機)。作成はバッチあたり 1 回に
-  - 作成直後、ユーザーが移動済みでなければ `windowsUpdate(mainWindowId, { focused:true })` で即時復帰。終了時復元も `lastFocusedWindow` 基準に改善 (別所へ移動済みなら復元しない)
+  - `openSlidesViewerWindow` → `openOrReuseSlidesWindow`: viewer ウィンドウをキュー内で使い回し (タブの URL 遷移+再待機)。作成はバッチあたり 1 回に
+  - 作成直後、ユーザーが移動済みでない場合のみ `windowsUpdate(mainWindowId, { focused:true })` で即時復帰。終了時復元も `lastFocusedWindow` 基準に改善 (別所へ移動済みなら復元しない)
   - `queueDownloads` で `slidesWindowSession` を共有 (Firefox は null のまま従来通り)。後始末は queue finally / reset の tracked set に一本化
+- **追記**: refocus が読み込み完了後だったため数秒間 Slides 画面を見せていた。`refocusAwayFromTab` を作成直後 (load 前) に移動 + ラスタ失敗メッセージに `firefoxLike:` フラグを追加 (Dia の判定状態を切り分け用)
 - 次の実機確認: 保存開始時の一瞬のちらつき以外は MOOCs ページに留まること
 
 ---
