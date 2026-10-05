@@ -247,6 +247,15 @@ glassmoocs-flow-1777522397563-mk3mkd
   - `openSlidesViewerWindow` / `windowsRemove` / `closeWindowQuietly` / `activeSlidesWindowIds` を追加。Chromium 経路はウィンドウ単位で開閉・リトライ・後始末 (reset/queue finally も対応)
   - capture 経路の前面化は不要になった (タブは自ウィンドウで前面のため `ensureCaptureTabActive` は即通過)
 
+## macOS の focused:false 無視 + ウィンドウ使い回し (2026-10-05)
+
+- macOS では `windows.create({ focused:false })` が無視され新規ウィンドウが必ず前面化される (OS 仕様)。裏調査で確認
+- 対応 (`public/background.js`):
+  - `openOrReuseSlidesWindow`: viewer ウィンドウをキュー内で使い回し (タブの URL 遷移+再待機)。作成はバッチあたり 1 回に
+  - 作成直後、ユーザーが移動済みでなければ `windowsUpdate(mainWindowId, { focused:true })` で即時復帰。終了時復元も `lastFocusedWindow` 基準に改善 (別所へ移動済みなら復元しない)
+  - `queueDownloads` で `slidesWindowSession` を共有 (Firefox は null のまま従来通り)。後始末は queue finally / reset の tracked set に一本化
+- 次の実機確認: 保存開始時の一瞬のちらつき以外は MOOCs ページに留まること
+
 ---
 
 ## まず見るべきファイル
