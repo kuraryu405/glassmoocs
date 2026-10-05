@@ -127,6 +127,7 @@
 
   let queueNonce = 0;
   const activeSlidesTabIds = new Set();
+  const activeSlidesWindowIds = new Set();
   let settingsDebugLoggingEnabled = false;
   let activeDebugLogContext = null;
   let debugLogBufferWrite = Promise.resolve();
@@ -762,6 +763,33 @@
     });
   }
 
+  function windowsRemove(windowId) {
+    try {
+      const result = api.windows.remove(windowId);
+      if (result && typeof result.then === 'function') {
+        return result.then(() => {});
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        api.windows.remove(windowId, () => {
+          const error = getRuntimeLastError();
+          if (error) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve();
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   function tabsRemove(tabIds) {
     try {
       const result = api.tabs.remove(tabIds);
@@ -1375,6 +1403,55 @@
   function rememberActiveSlidesTab(tabId) {
     if (typeof tabId === 'number') {
       activeSlidesTabIds.add(tabId);
+    }
+  }
+
+  function rememberActiveSlidesWindow(windowId) {
+    if (typeof windowId === 'number') {
+      activeSlidesWindowIds.add(windowId);
+    }
+  }
+
+  async function closeWindowQuietly(windowId) {
+    if (typeof windowId !== 'number') {
+      return;
+    }
+
+    try {
+      await windowsRemove(windowId);
+    } catch {
+      return;
+    } finally {
+      activeSlidesWindowIds.delete(windowId);
+    }
+  }
+
+  // Chromium 系では viewer を非フォーカスの別ウィンドウで開く。同一ウィンドウの
+  // 非アクティブタブはタイマー抑制で遅くなり、前面タブはユーザーの作業を奪う。
+  // 別ウィンドウの前面タブは可視扱いのため抑制されず、フォーカスも奪わない。
+  async function openSlidesViewerWindow(viewerUrl, cancelToken) {
+    assertNotCanceled(cancelToken);
+    const slidesWindow = await windowsCreate({
+      url: viewerUrl,
+      focused: false,
+    });
+    const windowId = slidesWindow?.id;
+    const slidesTab = slidesWindow?.tabs?.[0];
+    rememberActiveSlidesWindow(windowId);
+    rememberActiveSlidesTab(slidesTab?.id);
+    // waitForTabLoad の失敗で throw すると作成ウィンドウが orphan 化するため、
+    // ここで閉じてから再 throw する。
+    try {
+      assertNotCanceled(cancelToken);
+      const loadedTab = await waitForTabLoad(
+        slidesTab.id,
+        viewerUrl,
+        cancelToken,
+      );
+      return { tab: loadedTab, windowId };
+    } catch (error) {
+      await closeWindowQuietly(windowId);
+      throw error;
     }
   }
 
@@ -2678,6 +2755,8 @@
 
     let tabId =
       typeof slidesTabSession?.tabId === 'number' ? slidesTabSession.tabId : -1;
+    // Chromium 経路で自前作成した viewer ウィンドウ。finally で閉じる。
+    let ownedWindowId = null;
     let slidesWindowId = null;
     // Slides タブを前面化する前のアクティブタブを覚えておき、終了時に
     // ユーザーが別タブへ移動していなければ復元する (best-effort)。
@@ -2701,12 +2780,31 @@
 
         let loadedTab = null;
         try {
-          loadedTab = await openOrReuseSlidesTab(tabId, viewerUrl, cancelToken);
+          if (shouldActivateSlidesExportTab()) {
+            if (ownedWindowId !== null) {
+              await closeWindowQuietly(ownedWindowId);
+              ownedWindowId = null;
+              tabId = -1;
+            }
+            const opened = await openSlidesViewerWindow(viewerUrl, cancelToken);
+            ownedWindowId = opened.windowId;
+            loadedTab = opened.tab;
+          } else {
+            loadedTab = await openOrReuseSlidesTab(
+              tabId,
+              viewerUrl,
+              cancelToken,
+            );
+          }
         } catch (error) {
           // キャンセルは即座に伝播させる。呑んで continue すると
           // sleep+タブ churn の後に abort する無駄が生じる。
           if (isCancellationError(error)) {
             throw error;
+          }
+          if (ownedWindowId !== null) {
+            await closeWindowQuietly(ownedWindowId);
+            ownedWindowId = null;
           }
           if (tabId !== -1) {
             await closeTabQuietly(tabId);
@@ -2823,7 +2921,15 @@
           shouldRestoreFocus = false;
         }
       }
-      if (tabId !== -1) {
+      if (ownedWindowId !== null) {
+        postAgentLog(
+          'background.js:processSlidesDownload',
+          'closing slides window',
+          { windowId: ownedWindowId, reason: 'process complete' },
+          AGENT_LOG_HYPOTHESES.tab,
+        );
+        await closeWindowQuietly(ownedWindowId);
+      } else if (tabId !== -1) {
         postAgentLog(
           'background.js:processSlidesDownload',
           'closing slides tab',
@@ -3157,7 +3263,10 @@
         AGENT_LOG_HYPOTHESES.queue,
       );
     } finally {
-      await Promise.all([...activeSlidesTabIds].map(closeTabQuietly));
+      await Promise.all([
+        ...[...activeSlidesTabIds].map(closeTabQuietly),
+        ...[...activeSlidesWindowIds].map(closeWindowQuietly),
+      ]);
       activeDebugLogContext = null;
     }
   }
@@ -3216,6 +3325,11 @@
       activeSlidesTabIds.clear();
       closingTabIds.forEach((tabId) => {
         closeTabQuietly(tabId).catch(() => {});
+      });
+      const closingWindowIds = [...activeSlidesWindowIds];
+      activeSlidesWindowIds.clear();
+      closingWindowIds.forEach((windowId) => {
+        closeWindowQuietly(windowId).catch(() => {});
       });
       saveState(createIdleState())
         .then((state) => sendResponse({ ok: true, state }))

@@ -8,7 +8,7 @@
 
 1. **capture 権限ゲート** — background の `hasCapturePermission()` が見る。`<all_urls>` 付与済み、または (Chromium 等では) required host 権限の `https://docs.google.com/*` があれば capture 可。Firefox では `<all_urls>` が無いと権限不足になり得る。そのときだけページ内 UI・popup・専用許可ウィンドウの導線を使う。
 2. **`buildSlidesViewerUrl(entry)`**。`/embed`・`/pubembed` は **`/pub`**、private `/presentation/d/{id}/embed` は **`/present`** に寄せる（`waitForTabLoad` が `complete` になりにくい問題の対策）。
-3. **`tabs.create({ url: viewerUrl })`** — `about:blank` のまま固まる場合は最大 5 回リトライ（2 秒間隔）。
+3. **viewer の展開** — Chromium 系はフォーカスを奪わないよう非フォーカスの専用ウィンドウ (`openSlidesViewerWindow`, `focused:false`) に開く。Firefox は従来通りバックグラウンドタブ (`openOrReuseSlidesTab`)。`about:blank` のまま固まる場合は最大 5 回リトライ（2 秒間隔）。終了時はウィンドウ/タブを閉じ、元タブが前面ならフォーカス復元する。
 4. まず Slides タブ上の SVG を順に直列化し、画像を data URL にインライン化して background へ返す。
 5. background 側で SVG を JPEG 化して PDF を組み立てる。失敗時のみ `captureVisibleTab` フォールバックへ落とす。
 6. **`finally` でタブを閉じる**。
