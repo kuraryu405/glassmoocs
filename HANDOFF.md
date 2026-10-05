@@ -203,6 +203,15 @@ glassmoocs-flow-1777522397563-mk3mkd
   - `public/content/download-panel.js`: 失敗時は refresh せずエラーメッセージを残す。`context invalidated` 系エラーは「拡張機能の更新後はページの再読み込みが必要」旨の文言に変換
 - ユーザーへの案内: MOOCs ページを再読み込み (F5) して再試行。それでも失敗する場合はパネルに残るエラーメッセージを教えてもらう
 
+## 11 件全滅 + 権限エラーの報告 (2026-10-05)
+
+- 症状: 「完了: 0 / 失敗: 11 / 最新エラー: 権限が必要です...」。11 件全て `google_slides` で高速エクスポート失敗→capture 権限エラーの流れ
+- 権限メッセージが出る = 旧ゲート (`<all_urls>` 要求) のまま。PR ブランチの新ビルド (`hasCapturePermission` 緩和) に更新 + 拡張機能の再読み込み + MOOCs ページの再読み込みが必要
+- 真因特定の問題: `processSlidesDownload` が svgError を捨てて capture エラーのみ投げていたため、パネルの `lastError` に権限メッセージしか残らず切り分け不能だった
+- 対応:
+  - `public/background.js`: capture fallback 失敗時に `code` を保ったまま高速エクスポート失敗の要約を chained message として投げ直す (`needsCapturePermission` 導線は維持)。これで次回失敗時は真因がパネルに残る
+- 次の実機確認: 新ビルドで再試行し、(1) 権限カードが出るか、(2) 出る場合・失敗する場合のエラーメッセージ全文をもらう
+
 ---
 
 ## まず見るべきファイル
