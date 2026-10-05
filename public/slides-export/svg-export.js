@@ -42,8 +42,12 @@
     }
 
     async function fetchImageDirect(url) {
+      // same-origin では Cookie を送り、cross-origin では送らない。
+      // CDN (googleusercontent 等) は ACAO:* のため credentials:include だと
+      // 必ず失敗して background 経由の二重取得になり遅い。認証が必要な画像は
+      // background fetch (host 権限あり・Cookie 付き) が拾う。
       const response = await fetch(url.toString(), {
-        credentials: 'include',
+        credentials: 'same-origin',
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);

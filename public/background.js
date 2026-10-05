@@ -130,6 +130,16 @@
   let settingsDebugLoggingEnabled = false;
   let activeDebugLogContext = null;
   let debugLogBufferWrite = Promise.resolve();
+  // Slides viewer タブは前面化して処理するため、並列ワーカーが複数タブを
+  // 開くとフォーカスを奪い合って描画待機が不安定になる。google_slides は
+  // 直列化し、direct_file の並列性は維持する。
+  let slidesExclusiveTail = Promise.resolve();
+
+  function runSlidesExclusively(task) {
+    const result = slidesExclusiveTail.then(() => task());
+    slidesExclusiveTail = result.catch(() => {});
+    return result;
+  }
 
   if (!api?.runtime?.onMessage) {
     return;
@@ -2668,6 +2678,20 @@
 
     let tabId =
       typeof slidesTabSession?.tabId === 'number' ? slidesTabSession.tabId : -1;
+    let slidesWindowId = null;
+    // Slides タブを前面化する前のアクティブタブを覚えておき、終了時に
+    // ユーザーが別タブへ移動していなければ復元する (best-effort)。
+    let previousActiveTabId = null;
+    try {
+      const currentActive = await tabsQuery({
+        active: true,
+        currentWindow: true,
+      });
+      previousActiveTabId =
+        typeof currentActive[0]?.id === 'number' ? currentActive[0].id : null;
+    } catch {
+      previousActiveTabId = null;
+    }
     try {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         assertNotCanceled(cancelToken);
@@ -2695,6 +2719,7 @@
         }
 
         tabId = loadedTab.id;
+        slidesWindowId = loadedTab.windowId;
         if (slidesTabSession) {
           slidesTabSession.tabId = tabId;
         }
@@ -2780,6 +2805,24 @@
         'Google スライドのタブを開けませんでした。しばらく待ってから再試行してください。',
       );
     } finally {
+      // ユーザーが保存中に別タブへ移動していたら復元しない。
+      let shouldRestoreFocus = false;
+      if (
+        tabId !== -1 &&
+        typeof slidesWindowId === 'number' &&
+        typeof previousActiveTabId === 'number' &&
+        previousActiveTabId !== tabId
+      ) {
+        try {
+          const activeTabs = await tabsQuery({
+            active: true,
+            windowId: slidesWindowId,
+          });
+          shouldRestoreFocus = activeTabs[0]?.id === tabId;
+        } catch {
+          shouldRestoreFocus = false;
+        }
+      }
       if (tabId !== -1) {
         postAgentLog(
           'background.js:processSlidesDownload',
@@ -2788,6 +2831,13 @@
           AGENT_LOG_HYPOTHESES.tab,
         );
         await closeTabQuietly(tabId);
+      }
+      if (shouldRestoreFocus) {
+        try {
+          await tabsUpdate(previousActiveTabId, { active: true });
+        } catch {
+          // 元タブが閉じられていた場合などは無視する。
+        }
       }
       if (slidesTabSession) {
         slidesTabSession.tabId = null;
@@ -2958,11 +3008,13 @@
       try {
         const result =
           entry.kind === 'google_slides'
-            ? await processSlidesDownload(
-                courseName,
-                entry,
-                entryState,
-                cancelToken,
+            ? await runSlidesExclusively(() =>
+                processSlidesDownload(
+                  courseName,
+                  entry,
+                  entryState,
+                  cancelToken,
+                ),
               )
             : await processDirectDownload(courseName, entry, cancelToken);
         postAgentLog(
