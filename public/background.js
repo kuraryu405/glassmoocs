@@ -1451,7 +1451,7 @@
     const downloadId = await downloadFile({
       url: entry.url,
       filename,
-      conflictAction: 'overwrite',
+      conflictAction: 'uniquify',
       saveAs: false,
     });
     await waitForDownloadCompletion(downloadId, cancelToken);
@@ -1491,7 +1491,7 @@
       const downloadId = await downloadFile({
         url: downloadUrl,
         filename: normalizeText(filename, 'slides.pdf'),
-        conflictAction: 'overwrite',
+        conflictAction: 'uniquify',
         saveAs: false,
       });
       await waitForDownloadCompletion(downloadId, cancelToken);

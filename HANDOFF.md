@@ -112,7 +112,7 @@ glassmoocs-flow-1777522397563-mk3mkd
   - background: 前面化タブ割り込みの Chromium 除外(Chromium の rasterize は前面が前提のため毎回自殺していた)、getState の副作用分離、状態書き込みの一本化、リセット後のゾンビ書き込み防止、権限フラグの OR 蓄積、孤児 Slides タブの始末、DL 完了待ちの初回空結果耐性、Firefox 描画の二段フォールバック、起動競合の startupReady、capture 前の前面化
   - slides/popup/build: stale スナップショット受理の廃止、画像等のタイムアウト付与、worker 例外の吸収、canvas 上限、factory ガード(popup/slides-export)、権限カードのウィンドウ経由化+永続化、許可文言修正、goToSlide の方向再評価、画像 fetch の allowlist、SCRIPT_FILES 追加分、デバッグマクロ残留のビルド失敗化
   - 盲目 innerHTML 置換は削除した(対象が Preact 本体のため)。src/ で innerHTML を使わない運用で対応する
-- 未対応(P2 として報告のみ): Chrome SW の大 PDF blob 寿命、storage エラーの握り潰し、同一名ファイルの overwrite、上書き競合の uniquify 化、capture 権限の実行中 revoke 検出、root dist/ の stale ミラー、version 二重管理
+- 未対応(P2 として報告のみ): Chrome SW の大 PDF blob 寿命、storage エラーの握り潰し、capture 権限の実行中 revoke 検出、root dist/ の stale ミラー、version 二重管理
 
 ---
 
@@ -272,3 +272,8 @@ glassmoocs-flow-1777522397563-mk3mkd
 | [`public/slides-export.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/slides-export.js) | `waitForSlideReady` / `inlineSlideImages` / `serializeCurrentSlideSvg` の本体 |
 | [`public/background.js`](/Users/tsutsumin/Documents/GitHub/glassmoocs/public/background.js)       | debug log fallback buffer、Firefox 分岐、SVG ラスタライズ                     |
 | [`AGENTS.md`](/Users/tsutsumin/Documents/GitHub/glassmoocs/AGENTS.md)                             | 実行ルールとログ方針                                                          |
+
+## 同名資料の上書き防止 (2026-11-09、1.0.8)
+
+- 通常資料・Slides PDF の両方で `conflictAction` を `uniquify` に変更。同じ保存先名のファイルがある場合はブラウザが連番を付けて保存する。再ダウンロード時も既存ファイルを残す。
+- `pnpm run ci` 通過。通常資料・PDF 保存それぞれに同じ保存名を3回渡し、全件 `uniquify` が指定されることと、Firefox / Chromium の release 成果物を確認済み。
